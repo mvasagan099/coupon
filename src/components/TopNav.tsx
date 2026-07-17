@@ -10,7 +10,7 @@ interface TopNavProps {
   portal: 'customer' | 'merchant' | 'admin';
 }
 
-interface NavLink { label: string; path: string; Icon: React.ComponentType<{ size?: number }> }
+interface NavLink { label: string; path: string; Icon: React.ComponentType<{ size?: number; className?: string }> }
 
 const customerLinks: NavLink[] = [
   { label: 'Marketplace', path: '/dashboard/marketplace', Icon: ShoppingBag },

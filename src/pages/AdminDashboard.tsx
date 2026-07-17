@@ -1,7 +1,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { TrendingUp, Clock, Building2, ShieldAlert, CreditCard, Landmark, FileText, X, Activity } from 'lucide-react';
+import { TrendingUp, Clock, Building2, ShieldAlert, Landmark, FileText, X, Activity } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { DashboardCard } from '../components/GlassCard';
 import type { AdminPurchasedCoupon, AdminUser, Company, CompanyStats, GiftCard, Settlement } from '../lib/supabase';
@@ -55,7 +55,7 @@ export default function AdminDashboard() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [suspendingId, setSuspendingId] = useState<string | null>(null);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [_editingId, setEditingId] = useState<string | null>(null);
   const [editingLimit, setEditingLimit] = useState<number>(100);
   const [editLoading, setEditLoading] = useState(false);
 

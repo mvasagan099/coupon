@@ -1397,7 +1397,6 @@ export async function adminGenerateSettlements(year: number, month: number, comp
   } catch (err: any) {
     console.warn("[CouponVault] adminGenerateSettlements fallback:", err.message);
     const settlements = getLocal<Settlement[]>("cv_settlements", []);
-    const redemptions = getLocal<any[]>("cv_redemptions", []);
     const companies = getLocal<Company[]>("cv_companies", []);
     
     // Construct period
