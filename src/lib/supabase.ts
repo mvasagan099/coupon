@@ -1208,6 +1208,9 @@ export async function updateUserWalletBalance(userId: string, amount: number): P
 }
 
 export async function ensureUserProfile(userId: string): Promise<void> {
+  // Non-critical: silently attempt to create/verify the profile row.
+  // The wallet falls back to localStorage on any failure, so we never
+  // surface errors or log noisy warnings to the console.
   try {
     const { data, error } = await withTimeout(
       supabase
@@ -1215,24 +1218,21 @@ export async function ensureUserProfile(userId: string): Promise<void> {
         .select("id")
         .eq("id", userId)
         .maybeSingle(),
-      8000
+      3000 // short timeout — fail fast, fall back to localStorage
     );
 
-    if (error) throw error;
+    if (error) return; // RLS error, table missing, etc. — all non-fatal
     if (data) return;
 
-    const { error: insertError } = await withTimeout(
+    // Profile row doesn't exist yet — create it
+    await withTimeout(
       supabase
         .from("profiles")
         .insert({ id: userId, wallet_balance: 0 }),
-      8000
+      3000
     );
-
-    if (insertError) throw insertError;
-  } catch (err: any) {
-    if (!isMissingProfilesTableError(err)) {
-      console.warn("[CouponVault] ensureUserProfile failed:", err.message);
-    }
+  } catch {
+    // Swallow all errors silently — this is a best-effort operation
   }
 }
 
@@ -1246,7 +1246,14 @@ export interface RazorpayOrder {
 }
 
 function isMissingProfilesTableError(error: unknown) {
-  return error instanceof Error && error.message.includes("Could not find the table 'public.profiles'");
+  if (!(error instanceof Error)) return false;
+  const msg = error.message;
+  return (
+    msg.includes("Could not find the table 'public.profiles'") ||
+    msg.includes("profiles") ||
+    msg.includes("timed out") ||
+    msg.includes("fetch")
+  );
 }
 
 function isValidRazorpayKeyId(value: string | undefined) {

@@ -232,9 +232,19 @@ export default function UserDashboard() {
     if (!selectedProduct || !user) return;
 
     setPaymentLoading(true);
+    // Flag to prevent both payment.failed AND the outer catch from showing
+    // duplicate toasts when Razorpay itself is blocked by an ad blocker.
+    let paymentErrorShown = false;
     try {
       const res = await loadScript('https://checkout.razorpay.com/v1/checkout.js');
-      if (!res) throw new Error('Razorpay SDK failed to load');
+      if (!res) {
+        toastError(
+          'Razorpay blocked',
+          'Razorpay could not load. Please disable your ad blocker or browser extension and try again.'
+        );
+        setPaymentLoading(false);
+        return;
+      }
 
       // Create the order server-side first so the amount can't be tampered
       // with on the client, and so we have an order id to verify against.
@@ -282,21 +292,47 @@ export default function UserDashboard() {
             toastError('Fulfillment Error', getErrorMessage(err, 'Failed to complete purchase.'));
           }
         },
+        modal: {
+          ondismiss: () => {
+            // User closed the Razorpay modal without paying — reset loading
+            setPaymentLoading(false);
+          },
+        },
         prefill: { email: user.email || '' },
         theme: { color: '#8b5cf6' },
       };
 
       const paymentObject = new (window as any).Razorpay(options);
       paymentObject.on('payment.failed', function (response: any) {
-        toastError('Payment failed', response.error.description);
+        if (!paymentErrorShown) {
+          paymentErrorShown = true;
+          const desc = response?.error?.description || response?.error?.reason || 'Payment was declined.';
+          toastError('Payment failed', desc);
+        }
         setPaymentLoading(false);
       });
       paymentObject.open();
+      // Don't set paymentLoading false here — wait for handler/dismiss/failed
     } catch (err: unknown) {
-      toastError('Payment error', getErrorMessage(err, 'Could not initialize checkout.'));
+      if (!paymentErrorShown) {
+        paymentErrorShown = true;
+        const msg = getErrorMessage(err, 'Could not initialize checkout.');
+        // Detect ad-blocker / network block errors
+        const isBlocked = msg.toLowerCase().includes('blocked') ||
+          msg.toLowerCase().includes('network') ||
+          msg.toLowerCase().includes('failed to fetch') ||
+          msg.toLowerCase().includes('load failed');
+        toastError(
+          'Payment error',
+          isBlocked
+            ? 'Payment gateway is blocked. Please disable your ad blocker and try again.'
+            : msg
+        );
+      }
       setPaymentLoading(false);
     }
   };
+
 
   const handleWithdrawalSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -345,10 +381,15 @@ export default function UserDashboard() {
     }
 
     setAddMoneyLoading(true);
+    let topupErrorShown = false;
     try {
       const res = await loadScript('https://checkout.razorpay.com/v1/checkout.js');
       if (!res) {
-        toastError('Gateway Error', 'Razorpay SDK failed to load. Are you online?');
+        toastError(
+          'Razorpay blocked',
+          'Razorpay could not load. Please disable your ad blocker and try again.'
+        );
+        setAddMoneyLoading(false);
         return;
       }
 
@@ -391,21 +432,33 @@ export default function UserDashboard() {
             toastError('Top-up Error', getErrorMessage(err, 'Failed to update wallet balance.'));
           }
         },
+        modal: {
+          ondismiss: () => {
+            setAddMoneyLoading(false);
+          },
+        },
         prefill: { email: user?.email || '' },
         theme: { color: '#8b5cf6' },
       };
 
       const paymentObject = new (window as any).Razorpay(options);
       paymentObject.on('payment.failed', function (response: any) {
-        toastError('Payment failed', response.error?.description ?? 'The payment was declined.');
+        if (!topupErrorShown) {
+          topupErrorShown = true;
+          toastError('Payment failed', response.error?.description ?? 'The payment was declined.');
+        }
+        setAddMoneyLoading(false);
       });
       paymentObject.open();
     } catch (err: unknown) {
-      toastError('Top-up error', getErrorMessage(err, 'Could not initiate checkout. No funds were added.'));
-    } finally {
+      if (!topupErrorShown) {
+        topupErrorShown = true;
+        toastError('Top-up error', getErrorMessage(err, 'Could not initiate checkout. No funds were added.'));
+      }
       setAddMoneyLoading(false);
     }
   };
+
 
   const combinedTransactions = useMemo(() => {
     const list: Array<{ date: string; brand: string; type: string; amount: string; status: string }> = [];
