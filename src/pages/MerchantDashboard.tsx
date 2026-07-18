@@ -25,7 +25,11 @@ function isMerchantSection(value: string | undefined): value is MerchantSection 
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error && typeof (error as any).message === 'string') {
+    return (error as any).message;
+  }
+  return fallback;
 }
 
 function getDefaultExpiryDate() {

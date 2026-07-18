@@ -550,11 +550,24 @@ export async function getCompanyStats(): Promise<CompanyStats[]> {
 export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
   try {
     if (!isSupabaseConfigured || hasTimedOut) throw new Error("Failing fast for local mock");
-    let query = supabase.from("gift_cards").select("*, companies(name)");
-    if (companyId) {
-      query = query.eq("company_id", companyId);
+    
+    // First, try the new RPC which bypasses RLS to get global counts
+    let { data, error } = await supabase.rpc('get_gift_cards_with_counts');
+    
+    // If the RPC doesn't exist yet, fallback to the standard select
+    if (error) {
+      let query = supabase.from("gift_cards").select("*, companies(name)");
+      if (companyId) {
+        query = query.eq("company_id", companyId);
+      }
+      const res = await withTimeout(query.order("created_at", { ascending: false }), 8000);
+      data = res.data;
+      error = res.error;
+    } else if (companyId && data) {
+      // If RPC succeeded but we need to filter by company
+      data = data.filter((d: any) => d.company_id === companyId);
     }
-    const { data, error } = await withTimeout(query.order("created_at", { ascending: false }), 8000);
+    
     if (error) throw error;
     const localCards = getLocal<GiftCard[]>("cv_gift_cards", []);
     const localFiltered = companyId ? localCards.filter(c => c.company_id === companyId) : localCards;
@@ -565,7 +578,8 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
       ...localFiltered.map(c => ({ ...c, issued_count: Math.max(c.issued_count || 0, issuedCounts[c.id] || 0) })),
       ...(data ?? []).map((d: any) => ({
         ...d,
-        company_name: d.companies?.name,
+        company_name: d.company_name || d.companies?.name,
+        // Use the global count if available, otherwise fallback to local trackers
         issued_count: Math.max(d.issued_count || 0, issuedCounts[d.id] || 0)
       }))
     ];

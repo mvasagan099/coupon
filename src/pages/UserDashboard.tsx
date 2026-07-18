@@ -40,7 +40,11 @@ function isUserSection(value: string | undefined): value is UserSection {
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error && typeof (error as any).message === 'string') {
+    return (error as any).message;
+  }
+  return fallback;
 }
 
 export default function UserDashboard() {
@@ -599,7 +603,9 @@ export default function UserDashboard() {
                       <p style={{ margin: '0 0 0.85rem', color: 'var(--text-3)', lineHeight: 1.6, fontSize: '0.88rem' }}>{card.description}</p>
                       
                       {card.issue_limit ? (() => {
-                        const remaining = card.issue_limit - (card.issued_count || 0);
+                        const userPurchasedCount = userVouchers.filter(v => v.gift_card_id === card.id).length;
+                        const totalIssued = Math.max(card.issued_count || 0, userPurchasedCount);
+                        const remaining = card.issue_limit - totalIssued;
                         const isSoldOut = remaining <= 0;
                         return (
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

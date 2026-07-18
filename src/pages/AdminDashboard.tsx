@@ -31,7 +31,11 @@ function isAdminSection(value: string | undefined): value is AdminSection {
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error && typeof (error as any).message === 'string') {
+    return (error as any).message;
+  }
+  return fallback;
 }
 
 export default function AdminDashboard() {
