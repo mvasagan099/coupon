@@ -189,92 +189,9 @@ function setLocal<T>(key: string, val: T): void {
   localStorage.setItem(key, JSON.stringify(val));
 }
 
-const INIT_COMPANIES: Company[] = [
-  {
-    id: "co_starbucks",
-    name: "Starbucks Coffee",
-    prefix: "SBU",
-    coupon_limit: 500,
-    created_at: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(),
-    status: "approved",
-    gstin: "27AAAAA1111A1Z1",
-    pan: "AAAAA1111A",
-    address: "2401 Utah Ave S, Seattle, WA 98134",
-    bank_name: "Chase Bank",
-    account_number: "1234567890",
-    ifsc_code: "CHAS0123456",
-    document_url: "cert_incorporation_starbucks.pdf"
-  },
-  {
-    id: "co_amazon",
-    name: "Amazon Commerce",
-    prefix: "AMZ",
-    coupon_limit: 1000,
-    created_at: new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString(),
-    status: "approved",
-    gstin: "27BBBBB2222B2Z2",
-    pan: "BBBBB2222B",
-    address: "410 Terry Ave N, Seattle, WA 98109",
-    bank_name: "Wells Fargo",
-    account_number: "0987654321",
-    ifsc_code: "WFBI0001234",
-    document_url: "cert_incorp_amazon.pdf"
-  },
-  {
-    id: "co_nike",
-    name: "Nike Athletics",
-    prefix: "NKE",
-    coupon_limit: 300,
-    created_at: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString(),
-    status: "approved",
-    gstin: "27CCCCC3333C3Z3",
-    pan: "CCCCC3333C",
-    address: "One Bowerman Dr, Beaverton, OR 97005",
-    bank_name: "Citibank",
-    account_number: "1122334455",
-    ifsc_code: "CITI0000001",
-    document_url: "nike_kyc.pdf"
-  }
-];
+const INIT_COMPANIES: Company[] = [];
 
-const INIT_GIFT_CARDS: GiftCard[] = [
-  {
-    id: "gc_sbu_25",
-    company_id: "co_starbucks",
-    title: "Starbucks Brew Card",
-    description: "Get delicious, fresh-brewed coffee and merchandise. Valid at all participating Starbucks locations.",
-    value: 25,
-    price: 22.50,
-    expiry_date: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
-    banner_image: "https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=500&auto=format&fit=crop&q=60",
-    terms: "Not redeemable for cash. Cannot be combined with other coupons.",
-    created_at: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString()
-  },
-  {
-    id: "gc_amz_100",
-    company_id: "co_amazon",
-    title: "Amazon Shopping Ticket",
-    description: "Access millions of items on Amazon.com. Safe, secure, and fast checkouts.",
-    value: 100,
-    price: 92.00,
-    expiry_date: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
-    banner_image: "https://images.unsplash.com/photo-1523474253046-8cd2748b5fd2?w=500&auto=format&fit=crop&q=60",
-    terms: "Voucher cannot be reloaded. Standard Amazon.com terms apply.",
-    created_at: new Date(Date.now() - 4 * 24 * 3600 * 1000).toISOString()
-  },
-  {
-    id: "gc_nke_150",
-    company_id: "co_nike",
-    title: "Nike Just Do It Gift Card",
-    description: "Save on the latest footwear, athletic apparel, and accessories. Valid at Nike.com and Nike stores.",
-    value: 150,
-    price: 135.00,
-    expiry_date: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
-    banner_image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&auto=format&fit=crop&q=60",
-    terms: "Redeemable for Nike gear online and in-store. No fees or expiration date.",
-    created_at: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString()
-  }
-];
+const INIT_GIFT_CARDS: GiftCard[] = [];
 
 export function initializeLocalStorageDB() {
   if (!localStorage.getItem("cv_companies")) {
