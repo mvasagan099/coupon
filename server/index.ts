@@ -108,6 +108,42 @@ app.get('/api/v1/campaigns', async (req, res) => {
   return res.json({ success: true, data });
 });
 
+// POST /api/v1/wallet/transfer
+app.post('/api/v1/wallet/transfer', async (req, res) => {
+  try {
+    const { userEmail, amount, transactionId } = req.body;
+
+    if (!userEmail || !amount || !transactionId) {
+      return res.status(400).json({ success: false, message: 'Missing required parameters.' });
+    }
+
+    if (typeof amount !== 'number' || amount <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid transfer amount.' });
+    }
+
+    const { data, error } = await supabase.rpc('transfer_winnings_to_wallet', {
+      p_user_email: userEmail,
+      p_amount: amount,
+      p_transaction_id: transactionId
+    });
+
+    if (error) {
+      console.error('Transfer Error:', error);
+      // Handle unique constraint violation for idempotency
+      if (error.code === '23505' || error.message.includes('unique constraint')) {
+        return res.status(409).json({ success: false, code: 'DUPLICATE_TRANSACTION', message: 'Transaction already processed.' });
+      }
+      return res.status(400).json({ success: false, code: 'TRANSFER_FAILED', message: error.message });
+    }
+
+    return res.json({ success: true, message: 'Transfer successful', data });
+
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
 app.get('/api/v1/coupons/:id', async (req, res) => {
   const { id } = req.params;
   const { data: coupon, error } = await supabase
