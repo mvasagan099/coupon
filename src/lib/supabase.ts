@@ -559,12 +559,14 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
     const localCards = getLocal<GiftCard[]>("cv_gift_cards", []);
     const localFiltered = companyId ? localCards.filter(c => c.company_id === companyId) : localCards;
     
+    const issuedCounts = getLocal<Record<string, number>>("cv_issued_counts", {});
+
     return [
-      ...localFiltered,
+      ...localFiltered.map(c => ({ ...c, issued_count: Math.max(c.issued_count || 0, issuedCounts[c.id] || 0) })),
       ...(data ?? []).map((d: any) => ({
         ...d,
         company_name: d.companies?.name,
-        issued_count: 0
+        issued_count: Math.max(d.issued_count || 0, issuedCounts[d.id] || 0)
       }))
     ];
   } catch (err: any) {
@@ -572,9 +574,11 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
     const cards = getLocal<GiftCard[]>("cv_gift_cards", []);
     const companies = getLocal<Company[]>("cv_companies", []);
     const filtered = companyId ? cards.filter(c => c.company_id === companyId) : cards;
+    const issuedCounts = getLocal<Record<string, number>>("cv_issued_counts", {});
+    
     return filtered.map(c => {
       const co = companies.find(comp => comp.id === c.company_id);
-      return { ...c, company_name: co ? co.name : "Unknown Brand" };
+      return { ...c, company_name: co ? co.name : "Unknown Brand", issued_count: Math.max(c.issued_count || 0, issuedCounts[c.id] || 0) };
     });
   }
 }
@@ -634,12 +638,21 @@ export async function purchaseGiftCard(
     });
     if (error) throw error;
     if (!data || data.length === 0) throw new Error("Failed to issue coupon");
+    
+    // Increment local issued count for UI updates
+    const counts = getLocal<Record<string, number>>("cv_issued_counts", {});
+    counts[giftCardId] = (counts[giftCardId] || 0) + 1;
+    setLocal("cv_issued_counts", counts);
+
     return {
       coupon_code: data[0].coupon_code,
       order_id: data[0].order_id,
       coupon_id: data[0].coupon_id
     };
   } catch (err: any) {
+    if (err.message && (err.message.toLowerCase().includes("limit reached") || err.message.toLowerCase().includes("sold out"))) {
+      throw err;
+    }
     console.warn("[CouponVault] purchaseGiftCard failed, falling back to LocalStorage:", err.message);
     const cards = getLocal<GiftCard[]>("cv_gift_cards", []);
     const gc = cards.find(c => c.id === giftCardId);
@@ -648,6 +661,21 @@ export async function purchaseGiftCard(
     const companies = getLocal<Company[]>("cv_companies", []);
     const co = companies.find(c => c.id === gc.company_id);
     const prefix = co ? co.prefix : "MCH";
+    const limit = co ? (co.coupon_limit || 100) : 100;
+
+    const coupons = getLocal<Coupon[]>("cv_coupons", []);
+    const companyCouponsCount = coupons.filter(c => c.company_id === gc.company_id).length;
+
+    if (companyCouponsCount >= limit) {
+      throw new Error("Global company card limit reached");
+    }
+
+    if (gc.issue_limit) {
+      const campaignCouponsCount = coupons.filter(c => c.gift_card_id === giftCardId).length;
+      if (campaignCouponsCount >= gc.issue_limit) {
+        throw new Error("Campaign sold out (issue limit reached)");
+      }
+    }
 
     // Generate code
     const randomHex = Math.random().toString(36).substr(2, 8).toUpperCase();
@@ -681,7 +709,7 @@ export async function purchaseGiftCard(
       created_at: new Date().toISOString()
     };
 
-    const coupons = getLocal<Coupon[]>("cv_coupons", []);
+
     const orders = getLocal<Order[]>("cv_orders", []);
 
     coupons.push(newCoupon);
@@ -689,6 +717,11 @@ export async function purchaseGiftCard(
 
     setLocal("cv_coupons", coupons);
     setLocal("cv_orders", orders);
+    
+    // Increment local issued count for UI updates
+    const counts2 = getLocal<Record<string, number>>("cv_issued_counts", {});
+    counts2[giftCardId] = (counts2[giftCardId] || 0) + 1;
+    setLocal("cv_issued_counts", counts2);
 
     return {
       coupon_code: code,
