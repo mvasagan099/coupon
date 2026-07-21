@@ -126,14 +126,13 @@ export default function MerchantDashboard() {
         setPurchasedCoupons(coupons);
         setSettlements(merchantSettlements);
 
-        const mockSales = cards.reduce((acc, card) => acc + card.price * 5, 1250);
         const totalRedeemedValue = transactions.reduce((acc, transaction) => acc + transaction.amount, 0);
 
         setMetrics({
-          totalSales: mockSales,
+          totalSales: totalRedeemedValue,
           couponsRedeemed: transactions.length,
           activeOffers: cards.length,
-          liabilities: cards.reduce((acc, card) => acc + card.value * 5, 0) - totalRedeemedValue,
+          liabilities: cards.reduce((acc, card) => acc + card.value, 0) - totalRedeemedValue,
         });
       } else {
         setOffers([]);

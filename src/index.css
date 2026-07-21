@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+html {
+  zoom: 90%;
+}
+
 @theme {
   --font-family-sans: 'Outfit', sans-serif;
   --font-family-mono: 'Outfit', sans-serif;
@@ -1036,6 +1040,7 @@
   .hero-title-gradient {
     background: linear-gradient(135deg, #2563eb 0%, #7c3aed 50%, #4f46e5 100%);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     display: inline-block;
   }
@@ -3840,6 +3845,7 @@ select.input {
   padding: 2px;
   background: linear-gradient(135deg, rgba(255,255,255,0.4), rgba(255,255,255,0.05), rgba(255,255,255,0.4));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   opacity: 0.6;
