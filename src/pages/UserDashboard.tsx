@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { DashboardCard } from '../components/GlassCard';
 import { LoadingPage } from '../components/LoadingPage';
-import type { Coupon, GiftCard, Order, RedemptionTransaction, Withdrawal } from '../lib/supabase';
+import type { Coupon, GiftCard, Order, RedemptionTransaction, Withdrawal, UserDeposit } from '../lib/supabase';
 import {
   getGiftCards,
   getRedemptionTransactions,
@@ -18,6 +18,7 @@ import {
   addFunds,
   createWithdrawal,
   getUserWithdrawals,
+  getUserDeposits,
   createRazorpayOrder,
   verifyRazorpayPayment,
 } from '../lib/supabase';
@@ -75,6 +76,7 @@ export default function UserDashboard() {
   const [showAddMoneyModal, setShowAddMoneyModal] = useState(false);
   const [addMoneyAmount, setAddMoneyAmount] = useState('500');
   const [addMoneyLoading, setAddMoneyLoading] = useState(false);
+  const [deposits, setDeposits] = useState<UserDeposit[]>([]);
 
   const [selectedProduct, setSelectedProduct] = useState<GiftCard | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -142,13 +144,14 @@ export default function UserDashboard() {
         setTimeout(() => reject(new Error('Data loading timed out. Please try again.')), 12000)
       );
 
-      const [cards, vouchers, userOrders, userRedemptions, userWithdrawals] = await Promise.race([
+      const [cards, vouchers, userOrders, userRedemptions, userWithdrawals, userDeposits] = await Promise.race([
         Promise.all([
           getGiftCards(),
           getUserGiftCards(userId),
           getUserOrders(userId),
           getRedemptionTransactions(),
           getUserWithdrawals(userId),
+          getUserDeposits(userId),
         ]),
         loadTimeout,
       ]);
@@ -157,6 +160,7 @@ export default function UserDashboard() {
       setUserVouchers(vouchers);
       setOrders(userOrders);
       setWithdrawals(userWithdrawals);
+      setDeposits(userDeposits);
 
       const voucherIds = vouchers.map((voucher) => voucher.id);
       setRedemptions(userRedemptions.filter((redemption) => voucherIds.includes(redemption.coupon_id)));
@@ -487,8 +491,28 @@ export default function UserDashboard() {
       });
     });
 
+    deposits.forEach((deposit) => {
+      list.push({
+        date: deposit.created_at,
+        brand: deposit.payment_method || 'Wallet Top-up',
+        type: 'Deposit',
+        amount: `+₹${deposit.amount.toFixed(2)}`,
+        status: deposit.status === 'completed' ? 'Completed' : 'Pending',
+      });
+    });
+
+    withdrawals.forEach((w) => {
+      list.push({
+        date: w.created_at,
+        brand: `Payout (${w.account_number ? '...' + w.account_number.slice(-4) : 'Bank'})`,
+        type: 'Withdrawal',
+        amount: `-₹${w.amount.toFixed(2)}`,
+        status: w.status === 'completed' ? 'Completed' : w.status === 'rejected' ? 'Rejected' : 'Pending',
+      });
+    });
+
     return list.sort((a, b) => b.date.localeCompare(a.date));
-  }, [orders, redemptions]);
+  }, [orders, redemptions, deposits, withdrawals]);
 
   const filteredCatalog = useMemo(() => {
     return giftCards.filter((card) => {
@@ -717,6 +741,48 @@ export default function UserDashboard() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Deposit & Top-up History */}
+          <div className="glass-card-strong" style={{ padding: '1.25rem', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div className="section-label" style={{ margin: 0 }}>Deposit & Top-up History</div>
+              <span className="badge badge-green">{deposits.length} record{deposits.length === 1 ? '' : 's'}</span>
+            </div>
+            {deposits.length === 0 ? (
+              <p style={{ color: 'var(--text-3)', fontSize: '0.9rem', margin: '0.5rem 0' }}>
+                No deposits yet. Top up your wallet or transfer lottery winnings to see records here.
+              </p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="premium-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Method / Source</th>
+                      <th>Reference</th>
+                      <th>Amount</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deposits.map((d) => (
+                      <tr key={d.id}>
+                        <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(d.created_at).toLocaleString()}</td>
+                        <td style={{ fontWeight: 600 }}>{d.payment_method || 'Wallet Top-up'}</td>
+                        <td className="mono text-muted" style={{ fontSize: '0.8rem' }}>{d.reference_id || d.id.slice(0, 10)}</td>
+                        <td className="mono font-medium" style={{ color: 'var(--secondary)' }}>+₹{d.amount.toFixed(2)}</td>
+                        <td>
+                          <span className={`badge ${d.status === 'completed' ? 'badge-green' : d.status === 'failed' ? 'badge-red' : 'badge-amber'}`}>
+                            {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {withdrawals.length > 0 && (

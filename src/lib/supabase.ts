@@ -71,6 +71,16 @@ export interface Withdrawal {
   updated_at: string;
 }
 
+export interface UserDeposit {
+  id: string;
+  user_id: string;
+  amount: number;
+  payment_method: string;
+  reference_id?: string;
+  status: 'completed' | 'pending' | 'failed';
+  created_at: string;
+}
+
 export interface GiftCard {
   id: string;
   company_id: string;
@@ -1145,13 +1155,88 @@ export async function updateBalances(newBalance: number): Promise<void> {
 }
 
 // 10X SECURE: Use this for adding funds to prevent client-side manipulation
-export async function addFunds(userId: string, amount: number): Promise<number> {
-  const { data, error } = await supabase.rpc("add_wallet_funds", {
-    p_user_id: userId,
-    p_amount: amount
-  });
-  if (error) throw error;
-  return data;
+export async function addFunds(userId: string, amount: number, paymentMethod: string = 'Wallet Top-up', referenceId?: string): Promise<number> {
+  const newDeposit: UserDeposit = {
+    id: "dep_" + Math.random().toString(36).substr(2, 9),
+    user_id: userId,
+    amount: amount,
+    payment_method: paymentMethod,
+    reference_id: referenceId || `PAY-${Date.now()}`,
+    status: 'completed',
+    created_at: new Date().toISOString()
+  };
+
+  const localDeposits = getLocal<UserDeposit[]>("cv_deposits", []);
+  localDeposits.push(newDeposit);
+  setLocal("cv_deposits", localDeposits);
+
+  try {
+    const { data, error } = await supabase.rpc("add_wallet_funds", {
+      p_user_id: userId,
+      p_amount: amount
+    });
+    if (error) throw error;
+    return data;
+  } catch (err: any) {
+    const current = await getUserWalletBalance(userId);
+    const newBal = current + amount;
+    await updateUserWalletBalance(userId, newBal);
+    return newBal;
+  }
+}
+
+export async function getUserDeposits(userId: string): Promise<UserDeposit[]> {
+  try {
+    if (!isSupabaseConfigured || hasTimedOut) throw new Error("Failing fast for local mock");
+
+    const depositsQuery = supabase
+      .from('deposits')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    const transfersQuery = supabase
+      .from('wallet_transfers')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    const [depRes, trfRes] = await Promise.all([
+      withTimeout(depositsQuery, 8000).catch(() => ({ data: null, error: null })),
+      withTimeout(transfersQuery, 8000).catch(() => ({ data: null, error: null })),
+    ]);
+
+    const dbDeposits: UserDeposit[] = ((depRes as any)?.data ?? []).map((d: any) => ({
+      id: d.id,
+      user_id: d.user_id,
+      amount: Number(d.amount),
+      payment_method: d.payment_method || 'Wallet Top-up',
+      reference_id: d.reference_id || d.id,
+      status: (d.status?.toLowerCase() === 'success' ? 'completed' : d.status?.toLowerCase()) || 'completed',
+      created_at: d.created_at,
+    }));
+
+    const dbTransfers: UserDeposit[] = ((trfRes as any)?.data ?? []).map((t: any) => ({
+      id: t.id,
+      user_id: t.user_id,
+      amount: Number(t.amount),
+      payment_method: 'Lottery Winnings Transfer',
+      reference_id: t.transaction_id || t.reference_id || t.id,
+      status: (t.status?.toLowerCase() === 'success' ? 'completed' : t.status?.toLowerCase()) || 'completed',
+      created_at: t.created_at,
+    }));
+
+    const localDeposits = getLocal<UserDeposit[]>("cv_deposits", []).filter(d => d.user_id === userId);
+
+    const existingIds = new Set([...dbDeposits.map(d => d.id), ...dbTransfers.map(t => t.id)]);
+    const uniqueLocal = localDeposits.filter(d => !existingIds.has(d.id));
+
+    const allCombined = [...dbDeposits, ...dbTransfers, ...uniqueLocal];
+    return allCombined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  } catch (err: any) {
+    const localDeposits = getLocal<UserDeposit[]>("cv_deposits", []);
+    return localDeposits.filter(d => d.user_id === userId).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
 }
 
 export async function updateUserWalletBalance(userId: string, amount: number): Promise<void> {

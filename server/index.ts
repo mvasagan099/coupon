@@ -136,6 +136,23 @@ app.post('/api/v1/wallet/transfer', async (req, res) => {
       return res.status(400).json({ success: false, code: 'TRANSFER_FAILED', message: error.message });
     }
 
+    // Insert deposit record for tracking
+    try {
+      const { data: userProfile } = await supabase.from('profiles').select('id').eq('email', userEmail).maybeSingle();
+      if (userProfile?.id) {
+        await supabase.from('deposits').insert({
+          user_id: userProfile.id,
+          amount: amount,
+          payment_method: 'Lottery Winnings Transfer',
+          reference_id: transactionId,
+          status: 'completed',
+          created_at: new Date().toISOString()
+        });
+      }
+    } catch (depErr) {
+      console.warn('Could not record deposit tracking row:', depErr);
+    }
+
     return res.json({ success: true, message: 'Transfer successful', data });
 
   } catch (err: any) {
