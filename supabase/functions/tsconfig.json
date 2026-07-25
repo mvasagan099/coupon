@@ -1,0 +1,23 @@
+{
+  // This tsconfig is for Supabase Edge Functions which run on Deno, not Node.js.
+  // The IDE (and the Deno VS Code extension) uses this to understand Deno-style
+  // URL imports and the global `Deno` namespace.
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ESNext", "DOM"],
+    "strict": true,
+    "noImplicitAny": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    // Deno type definitions — tells TS about `Deno`, `serve`, etc.
+    "types": ["https://deno.land/x/types/index.d.ts"]
+  },
+  // Only include the edge function source files — exclude everything else
+  // so the root Node tsconfig doesn't pick these up.
+  "include": [
+    "./**/*.ts"
+  ],
+  "exclude": []
+}

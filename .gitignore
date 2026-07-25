@@ -1,2 +1,22 @@
+# Dependencies
 node_modules
-node_modules
+
+# Environment variables – NEVER commit real secrets
+.env
+.env.*
+.env.local
+.env.production
+.env.staging
+
+# Build output
+dist
+build
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / IDE files
+.DS_Store
+Thumbs.db
+.vscode/settings.json
