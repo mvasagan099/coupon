@@ -1,3 +1,4 @@
+// @ts-nocheck
 // supabase/functions/redeem-coupon/index.ts
 // Edge Function: Validate and redeem a coupon code on behalf of an authenticated user.
 // SECURITY FIX (CRIT-08): Requires a valid Bearer JWT; verifies coupon ownership before redeeming.
