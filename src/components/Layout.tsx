@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon, ShoppingBag, Wallet, Activity, CreditCard } from 'lucide-react';
 
 import { useTheme } from '../hooks/useTheme';
 import TopNav from './TopNav';
@@ -10,9 +10,20 @@ interface LayoutProps {
   children?: ReactNode;
 }
 
+const customerLinks = [
+  { label: 'Marketplace', path: '/dashboard/marketplace', Icon: ShoppingBag },
+  { label: 'Wallet',      path: '/dashboard/wallet',      Icon: Wallet },
+  { label: 'Activity',    path: '/dashboard/activity',    Icon: Activity },
+  { label: 'My Cards',    path: '/dashboard/cards',       Icon: CreditCard },
+];
+
 export function Layout({ children }: LayoutProps = {}) {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [location.pathname]);
 
   const isDashboard =
     location.pathname.startsWith('/dashboard') ||
@@ -43,23 +54,23 @@ export function Layout({ children }: LayoutProps = {}) {
         {/* Skip to main content */}
         <a href="#main-content" className="skip-link">Skip to main content</a>
         
-        {/* Floating Glass Header Container */}
-        <div className="fixed top-4 left-4 right-4 md:left-8 md:right-8 z-50 transition-all duration-300">
-          <header className="glass-header layout-dashboard-header flex flex-col md:flex-row md:items-center justify-between gap-4 p-3 md:p-4 md:px-6 rounded-2xl shadow-glass border border-[var(--border-glass)] backdrop-blur-xl" role="banner">
-            <div className="flex justify-between items-center w-full md:w-auto">
-              <div className="layout-dashboard-heading flex flex-row items-center gap-3">
-                <Link to="/" className="sidebar-brand-mark flex items-center justify-center font-extrabold text-white no-underline w-9 h-9 rounded-xl shrink-0 transition-transform hover:scale-105" style={{ background: currentPortal === 'customer' ? 'var(--gradient-primary)' : currentPortal === 'merchant' ? 'var(--gradient-merchant)' : 'var(--gradient-admin)', boxShadow: 'var(--primary-glow)' }}>C</Link>
-                <div className="hidden md:block">
-                  <h1 className="layout-dashboard-title text-base font-bold m-0" style={{ lineHeight: '1.2' }}>
-                    {currentPortal === 'admin'
-                      ? 'Operations'
-                      : currentPortal === 'merchant'
-                        ? 'Workspace'
-                        : 'Gift Hub'}
-                  </h1>
-                </div>
+        {/* Static Opaque Header Container */}
+        <div className="w-full bg-[var(--surface)] border-b border-[var(--border)] relative z-30 transition-all duration-300">
+          <header className="layout-dashboard-header flex flex-row items-center justify-between gap-4 p-4 md:px-8 max-w-[1600px] mx-auto w-full" role="banner">
+            <div className="flex items-center gap-3">
+              <Link to="/" className="sidebar-brand-mark flex items-center justify-center font-extrabold text-white no-underline w-9 h-9 rounded-xl shrink-0 transition-transform hover:scale-105" style={{ background: currentPortal === 'customer' ? 'var(--gradient-primary)' : currentPortal === 'merchant' ? 'var(--gradient-merchant)' : 'var(--gradient-admin)', boxShadow: 'var(--primary-glow)' }}>C</Link>
+              <div className="hidden md:block">
+                <h1 className="layout-dashboard-title text-base font-bold m-0" style={{ lineHeight: '1.2' }}>
+                  {currentPortal === 'admin'
+                    ? 'Operations'
+                    : currentPortal === 'merchant'
+                      ? 'Workspace'
+                      : 'Gift Hub'}
+                </h1>
               </div>
-
+            </div>
+            
+            <div className="flex items-center gap-2 md:gap-4">
               {/* Mobile Actions (Visible only on small screens) */}
               <div className="flex md:hidden items-center gap-2">
                 <span className={`${portalBadgeClass} font-bold text-[10px]`}>
@@ -69,29 +80,51 @@ export function Layout({ children }: LayoutProps = {}) {
                   {theme === 'light' ? <Moon size={14} /> : <Sun size={14} />}
                 </button>
               </div>
-            </div>
-            
-            <div className="flex-1 w-full md:w-auto overflow-x-auto no-scrollbar">
-              <TopNav portal={currentPortal as 'customer' | 'merchant' | 'admin'} />
-            </div>
 
-            {/* Desktop Actions */}
-            <div className="hidden md:flex items-center gap-3 shrink-0 pl-2 border-l border-[var(--border)]">
-              <span className={`${portalBadgeClass} font-bold text-xs`}>
-                {currentPortal === 'admin' ? 'Admin' : currentPortal === 'merchant' ? 'Merchant' : 'Customer'}
-              </span>
-              <button className="theme-toggle p-2 rounded-full hover:bg-[var(--bg-3)] transition-colors" onClick={toggleTheme} aria-label="Toggle theme">
-                {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
-              </button>
+              <TopNav portal={currentPortal as 'customer' | 'merchant' | 'admin'} />
+
+              {/* Desktop Actions */}
+              <div className="hidden md:flex items-center gap-3 shrink-0 pl-2 border-l border-[var(--border)]">
+                <span className={`${portalBadgeClass} font-bold text-xs`}>
+                  {currentPortal === 'admin' ? 'Admin' : currentPortal === 'merchant' ? 'Merchant' : 'Customer'}
+                </span>
+                <button className="theme-toggle p-2 rounded-full hover:bg-[var(--bg-3)] transition-colors" onClick={toggleTheme} aria-label="Toggle theme">
+                  {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+                </button>
+              </div>
             </div>
           </header>
         </div>
 
-        <div className="layout-dashboard-shell relative z-[1] pt-[140px] md:pt-[100px]">
-          <main id="main-content" className="dashboard-content-glass fade-in layout-dashboard-content flex-1 p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto w-full" role="main">
+        <div className="layout-dashboard-shell relative z-[1]">
+          <main id="main-content" className="dashboard-content-glass page-fade-in layout-dashboard-content flex-1 p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto w-full" role="main">
             {children ?? <Outlet />}
           </main>
         </div>
+
+        {/* Mobile Bottom Navigation Bar (Customer Portal Only) */}
+        {currentPortal === 'customer' && (
+          <div className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[var(--surface)]/92 border-t border-[var(--border)] px-4 py-2.5 flex justify-around items-center shadow-[0_-8px_30px_rgb(0,0,0,0.06)] backdrop-blur-xl">
+            {customerLinks.map((link, index) => {
+              const isActive = index === 0
+                ? location.pathname === link.path
+                : location.pathname.startsWith(link.path);
+              return (
+                <Link
+                  key={link.path}
+                  to={link.path}
+                  className={`flex flex-col items-center gap-1 py-1 px-3 rounded-2xl transition-all duration-300 ${
+                    isActive ? 'text-[var(--primary)] font-semibold' : 'text-[var(--text-3)]'
+                  }`}
+                  style={{ flex: 1 }}
+                >
+                  <link.Icon size={18} className={isActive ? 'scale-110 text-[var(--primary)]' : 'opacity-70'} />
+                  <span style={{ fontSize: '10px', fontWeight: isActive ? 600 : 500 }}>{link.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }

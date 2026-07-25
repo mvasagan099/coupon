@@ -19,19 +19,7 @@ import {
   createWithdrawal,
   getUserWithdrawals,
   getUserDeposits,
-  createRazorpayOrder,
-  verifyRazorpayPayment,
 } from '../lib/supabase';
-
-function loadScript(src: string) {
-  return new Promise((resolve) => {
-    const script = document.createElement('script');
-    script.src = src;
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-}
 
 const validSections = ['marketplace', 'wallet', 'activity', 'cards'] as const;
 type UserSection = (typeof validSections)[number];
@@ -77,6 +65,13 @@ export default function UserDashboard() {
   const [addMoneyAmount, setAddMoneyAmount] = useState('500');
   const [addMoneyLoading, setAddMoneyLoading] = useState(false);
   const [deposits, setDeposits] = useState<UserDeposit[]>([]);
+  const [depositPage, setDepositPage] = useState(1);
+  const [withdrawPage, setWithdrawPage] = useState(1);
+  const [activityPage, setActivityPage] = useState(1);
+  const [marketplacePage, setMarketplacePage] = useState(1);
+  const [cardsPage, setCardsPage] = useState(1);
+  const [vouchersTab, setVouchersTab] = useState<'unused' | 'used'>('unused');
+  const ITEMS_PER_PAGE = 5;
 
   const [selectedProduct, setSelectedProduct] = useState<GiftCard | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -98,6 +93,10 @@ export default function UserDashboard() {
       navigate('/dashboard/marketplace', { replace: true });
     }
   }, [navigate, section]);
+
+  useEffect(() => {
+    setMarketplacePage(1);
+  }, [catalogSearch, priceFilter]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -184,6 +183,22 @@ export default function UserDashboard() {
     void syncDashboard();
   }, [authLoading, userId, loadData]);
 
+  useEffect(() => {
+    const isAnyModalOpen = !!activeVoucher || showPaymentModal || showWithdrawModal || showAddMoneyModal;
+    if (isAnyModalOpen) {
+      document.body.style.overflow = 'hidden';
+      document.body.classList.add('body-modal-open');
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    } else {
+      document.body.style.overflow = '';
+      document.body.classList.remove('body-modal-open');
+    }
+    return () => {
+      document.body.style.overflow = '';
+      document.body.classList.remove('body-modal-open');
+    };
+  }, [activeVoucher, showPaymentModal, showWithdrawModal, showAddMoneyModal]);
+
   const handleInitiatePurchase = (card: GiftCard) => {
     setSelectedProduct(card);
     setShowPaymentModal(true);
@@ -236,110 +251,7 @@ export default function UserDashboard() {
     }
   };
 
-  const handleRazorpayPurchase = async () => {
-    if (!selectedProduct || !user) return;
 
-    setPaymentLoading(true);
-    // Flag to prevent both payment.failed AND the outer catch from showing
-    // duplicate toasts when Razorpay itself is blocked by an ad blocker.
-    let paymentErrorShown = false;
-    try {
-      const res = await loadScript('https://checkout.razorpay.com/v1/checkout.js');
-      if (!res) {
-        toastError(
-          'Razorpay blocked',
-          'Razorpay could not load. Please disable your ad blocker or browser extension and try again.'
-        );
-        setPaymentLoading(false);
-        return;
-      }
-
-      // Create the order server-side first so the amount can't be tampered
-      // with on the client, and so we have an order id to verify against.
-      const order = await createRazorpayOrder({
-        amount: Math.round(selectedProduct.price * 100),
-        currency: 'INR',
-        receipt: `gc_${selectedProduct.id}_${Date.now()}`,
-        notes: { user_id: user.id, gift_card_id: selectedProduct.id },
-      });
-
-      const options = {
-        key: order.key_id,
-        amount: order.amount.toString(),
-        currency: order.currency,
-        name: 'CouponVault Checkout',
-        description: `Purchase ${selectedProduct.title}`,
-        order_id: order.id || undefined,
-        handler: async function (response: { razorpay_order_id?: string; razorpay_payment_id?: string; razorpay_signature?: string }) {
-          try {
-            // Never fulfil the order until the payment signature is
-            // verified server-side - the client's word alone isn't proof.
-            const { verified } = await verifyRazorpayPayment({
-              razorpay_order_id: response.razorpay_order_id ?? '',
-              razorpay_payment_id: response.razorpay_payment_id ?? '',
-              razorpay_signature: response.razorpay_signature ?? '',
-            });
-            if (!verified) {
-              toastError('Payment error', 'Payment could not be verified. No coupon was issued.');
-              return;
-            }
-
-            const result = await purchaseGiftCard(
-              selectedProduct.id,
-              user.id,
-              user.email || 'customer@demo.com',
-              selectedProduct.price,
-            );
-
-            success('Payment approved', `Voucher code generated: ${result.coupon_code}`);
-            setShowPaymentModal(false);
-            setSelectedProduct(null);
-            navigate('/dashboard/cards');
-            loadData();
-          } catch (err: unknown) {
-            toastError('Fulfillment Error', getErrorMessage(err, 'Failed to complete purchase.'));
-          }
-        },
-        modal: {
-          ondismiss: () => {
-            // User closed the Razorpay modal without paying — reset loading
-            setPaymentLoading(false);
-          },
-        },
-        prefill: { email: user.email || '' },
-        theme: { color: '#8b5cf6' },
-      };
-
-      const paymentObject = new (window as any).Razorpay(options);
-      paymentObject.on('payment.failed', function (response: any) {
-        if (!paymentErrorShown) {
-          paymentErrorShown = true;
-          const desc = response?.error?.description || response?.error?.reason || 'Payment was declined.';
-          toastError('Payment failed', desc);
-        }
-        setPaymentLoading(false);
-      });
-      paymentObject.open();
-      // Don't set paymentLoading false here — wait for handler/dismiss/failed
-    } catch (err: unknown) {
-      if (!paymentErrorShown) {
-        paymentErrorShown = true;
-        const msg = getErrorMessage(err, 'Could not initialize checkout.');
-        // Detect ad-blocker / network block errors
-        const isBlocked = msg.toLowerCase().includes('blocked') ||
-          msg.toLowerCase().includes('network') ||
-          msg.toLowerCase().includes('failed to fetch') ||
-          msg.toLowerCase().includes('load failed');
-        toastError(
-          'Payment error',
-          isBlocked
-            ? 'Payment gateway is blocked. Please disable your ad blocker and try again.'
-            : msg
-        );
-      }
-      setPaymentLoading(false);
-    }
-  };
 
 
   const handleWithdrawalSubmit = async (event: React.FormEvent) => {
@@ -352,16 +264,16 @@ export default function UserDashboard() {
     }
 
     setWithdrawLoading(true);
-    setWithdrawStep(2); // Go to Razorpay Payouts processing view
+    setWithdrawStep(2); // Go to PayPal Payouts processing view
 
-    // Simulate connecting to Razorpay Payouts API
+    // Simulate connecting to PayPal Payouts API
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     try {
       const newBalance = walletBalance - amount;
       
       // Create withdrawal request in database
-      await createWithdrawal(user.id, amount, withdrawForm.routing, withdrawForm.account);
+      await createWithdrawal(user.id, amount, 'PAYPAL', withdrawForm.account);
       
       // Update local wallet balance state
       await updateUserWalletBalance(user.id, newBalance);
@@ -371,7 +283,7 @@ export default function UserDashboard() {
       await loadData();
       
       setWithdrawStep(3); // Go to success view
-      success('Payout processed', `Razorpay Payout of ₹${amount.toFixed(2)} processed successfully.`);
+      success('Payout processed', `PayPal Payout of ₹${amount.toFixed(2)} processed successfully.`);
     } catch (err: unknown) {
       setWithdrawStep(1); // Return to form on error
       toastError('Withdrawal error', getErrorMessage(err, 'Failed to process payout.'));
@@ -389,80 +301,17 @@ export default function UserDashboard() {
     }
 
     setAddMoneyLoading(true);
-    let topupErrorShown = false;
     try {
-      const res = await loadScript('https://checkout.razorpay.com/v1/checkout.js');
-      if (!res) {
-        toastError(
-          'Razorpay blocked',
-          'Razorpay could not load. Please disable your ad blocker and try again.'
-        );
-        setAddMoneyLoading(false);
-        return;
+      if (user?.id) {
+        await addFunds(user.id, amountNum);
+        await refreshWalletBalance();
       }
-
-      const order = await createRazorpayOrder({
-        amount: Math.round(amountNum * 100),
-        currency: 'INR',
-        receipt: `wallet_${user?.id ?? 'anon'}_${Date.now()}`,
-        notes: { user_id: user?.id ?? '', purpose: 'wallet_topup' },
-      });
-
-      const options = {
-        key: order.key_id,
-        amount: order.amount.toString(),
-        currency: order.currency,
-        name: 'CouponVault Wallet',
-        description: 'Add funds to wallet',
-        order_id: order.id || undefined,
-        handler: async function (response: { razorpay_order_id?: string; razorpay_payment_id?: string; razorpay_signature?: string }) {
-          try {
-            // Only credit the wallet once the payment signature has been
-            // verified server-side. Never trust the checkout callback alone.
-            const { verified } = await verifyRazorpayPayment({
-              razorpay_order_id: response.razorpay_order_id ?? '',
-              razorpay_payment_id: response.razorpay_payment_id ?? '',
-              razorpay_signature: response.razorpay_signature ?? '',
-            });
-            if (!verified) {
-              toastError('Payment error', 'Payment could not be verified. Your wallet was not credited.');
-              return;
-            }
-
-            if (user?.id) {
-              await addFunds(user.id, amountNum);
-              await refreshWalletBalance();
-            }
-            success('Funds added', `Successfully added ₹${amountNum.toFixed(2)} to your wallet.`);
-            setShowAddMoneyModal(false);
-            setAddMoneyAmount('500');
-          } catch (err: unknown) {
-            toastError('Top-up Error', getErrorMessage(err, 'Failed to update wallet balance.'));
-          }
-        },
-        modal: {
-          ondismiss: () => {
-            setAddMoneyLoading(false);
-          },
-        },
-        prefill: { email: user?.email || '' },
-        theme: { color: '#8b5cf6' },
-      };
-
-      const paymentObject = new (window as any).Razorpay(options);
-      paymentObject.on('payment.failed', function (response: any) {
-        if (!topupErrorShown) {
-          topupErrorShown = true;
-          toastError('Payment failed', response.error?.description ?? 'The payment was declined.');
-        }
-        setAddMoneyLoading(false);
-      });
-      paymentObject.open();
+      success('Funds added', `Successfully added ₹${amountNum.toFixed(2)} to your wallet.`);
+      setShowAddMoneyModal(false);
+      setAddMoneyAmount('500');
     } catch (err: unknown) {
-      if (!topupErrorShown) {
-        topupErrorShown = true;
-        toastError('Top-up error', getErrorMessage(err, 'Could not initiate checkout. No funds were added.'));
-      }
+      toastError('Top-up Error', getErrorMessage(err, 'Failed to update wallet balance.'));
+    } finally {
       setAddMoneyLoading(false);
     }
   };
@@ -529,8 +378,41 @@ export default function UserDashboard() {
     });
   }, [catalogSearch, giftCards, priceFilter]);
 
-  const activeVoucherCount = userVouchers.filter((voucher) => !voucher.is_used).length;
+  const totalDepositPages = Math.ceil(deposits.length / ITEMS_PER_PAGE);
+  const slicedDeposits = deposits.slice(
+    (depositPage - 1) * ITEMS_PER_PAGE,
+    depositPage * ITEMS_PER_PAGE
+  );
 
+  const totalWithdrawalPages = Math.ceil(withdrawals.length / ITEMS_PER_PAGE);
+  const slicedWithdrawals = withdrawals.slice(
+    (withdrawPage - 1) * ITEMS_PER_PAGE,
+    withdrawPage * ITEMS_PER_PAGE
+  );
+
+  const totalActivityPages = Math.ceil(combinedTransactions.length / ITEMS_PER_PAGE);
+  const slicedActivity = combinedTransactions.slice(
+    (activityPage - 1) * ITEMS_PER_PAGE,
+    activityPage * ITEMS_PER_PAGE
+  );
+
+  const totalMarketplacePages = Math.ceil(filteredCatalog.length / ITEMS_PER_PAGE);
+  const slicedMarketplace = filteredCatalog.slice(
+    (marketplacePage - 1) * ITEMS_PER_PAGE,
+    marketplacePage * ITEMS_PER_PAGE
+  );
+
+  const activeVouchersList = userVouchers.filter(v => v.status !== 'redeemed' && !v.is_used);
+  const redeemedVouchersList = userVouchers.filter(v => v.status === 'redeemed' || v.is_used);
+
+  const selectedCardsList = vouchersTab === 'unused' ? activeVouchersList : redeemedVouchersList;
+  const totalCardsPages = Math.ceil(selectedCardsList.length / ITEMS_PER_PAGE);
+  const slicedCards = selectedCardsList.slice(
+    (cardsPage - 1) * ITEMS_PER_PAGE,
+    cardsPage * ITEMS_PER_PAGE
+  );
+  const activeVoucherCount = activeVouchersList.length;
+  const usedVoucherCount = redeemedVouchersList.length;
 
   return (
     <div className="dashboard-container">
@@ -548,7 +430,7 @@ export default function UserDashboard() {
                 onChange={(event) => setCatalogSearch(event.target.value)}
               />
             </div>
-            <select className="input" style={{ width: 'auto', borderRadius: '99px', padding: '0.8rem 1.25rem', background: 'var(--surface-soft)' }} value={priceFilter} onChange={(event) => setPriceFilter(event.target.value)}>
+            <select className="input" style={{ width: 'auto', borderRadius: '99px', padding: '0.8rem 1.25rem', backgroundColor: 'var(--surface-soft)' }} value={priceFilter} onChange={(event) => setPriceFilter(event.target.value)}>
               <option value="All">All prices</option>
               <option value="low">Under ₹500</option>
               <option value="mid">₹500 - ₹2000</option>
@@ -585,75 +467,103 @@ export default function UserDashboard() {
               </button>
             </div>
           ) : (
-            <div className="responsive-grid-3 stagger-fade">
-              {filteredCatalog.map((card) => {
-                const val = card.value ?? 0;
-                const prc = card.price ?? 0;
-                const savings = val - prc;
-                const savingsPct = val > 0 ? Math.round((savings / val) * 100) : 0;
+            <div>
+              <div className="responsive-grid-3 stagger-fade">
+                {slicedMarketplace.map((card) => {
+                  const val = card.value ?? 0;
+                  const prc = card.price ?? 0;
+                  const savings = val - prc;
+                  const savingsPct = val > 0 ? Math.round((savings / val) * 100) : 0;
 
-                return (
-                  <div key={card.id} className="card card-hover card-lift marketplace-card" style={{ padding: '1rem', position: 'relative' }}>
-                    <div className="img-zoom"
-                      style={{
-                        minHeight: '220px',
-                        borderRadius: '24px',
-                        padding: '1.2rem',
-                        color: '#fff',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between',
-                        position: 'relative',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div className="marketplace-card-img" style={{ position: 'absolute', inset: 0, background: `url(${card.banner_image || 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=900&auto=format&fit=crop&q=60'}) center/cover`, zIndex: 0 }} />
-                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(160deg, rgba(25,28,29,0.55), rgba(25,28,29,0.85))', zIndex: 1 }} />
-                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 50%)', pointerEvents: 'none', borderRadius: '24px', zIndex: 2 }} />
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', position: 'relative', zIndex: 3 }}>
-                        <span className="badge" style={{ background: 'rgba(128,249,200,0.2)', color: '#fff', backdropFilter: 'blur(8px)' }}>
-                          Save {savingsPct}%
-                        </span>
-                      </div>
-                      <div style={{ position: 'relative', zIndex: 3 }}>
-                        <div style={{ fontSize: '1.35rem', fontWeight: 800 }}>{card.title}</div>
-                        <div style={{ color: 'rgba(255,255,255,0.78)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          <Zap size={14} /> ₹{prc.toFixed(2)} now, value ₹{val.toFixed(2)}
+                  return (
+                    <div key={card.id} className="card card-hover card-lift marketplace-card" style={{ padding: '1rem', position: 'relative' }}>
+                      <div className="img-zoom"
+                        style={{
+                          minHeight: '220px',
+                          borderRadius: '24px',
+                          padding: '1.2rem',
+                          color: '#fff',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          position: 'relative',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <div className="marketplace-card-img" style={{ position: 'absolute', inset: 0, background: `url(${card.banner_image || 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=900&auto=format&fit=crop&q=60'}) center/cover`, zIndex: 0 }} />
+                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(160deg, rgba(25,28,29,0.55), rgba(25,28,29,0.85))', zIndex: 1 }} />
+                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 50%)', pointerEvents: 'none', borderRadius: '24px', zIndex: 2 }} />
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', position: 'relative', zIndex: 3 }}>
+                          <span className="badge" style={{ background: 'rgba(128,249,200,0.2)', color: '#fff', backdropFilter: 'blur(8px)' }}>
+                            Save {savingsPct}%
+                          </span>
+                        </div>
+                        <div style={{ position: 'relative', zIndex: 3 }}>
+                          <div style={{ fontSize: '1.35rem', fontWeight: 800 }}>{card.title}</div>
+                          <div style={{ color: 'rgba(255,255,255,0.78)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <Zap size={14} /> ₹{prc.toFixed(2)} now, value ₹{val.toFixed(2)}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div style={{ padding: '1rem 0.35rem 0 0.35rem' }}>
-                      <p style={{ margin: '0 0 0.85rem', color: 'var(--text-3)', lineHeight: 1.6, fontSize: '0.88rem' }}>{card.description}</p>
-                      
-                      {card.issue_limit ? (() => {
-                        const userPurchasedCount = userVouchers.filter(v => v.gift_card_id === card.id).length;
-                        const totalIssued = Math.max(card.issued_count || 0, userPurchasedCount);
-                        const remaining = card.issue_limit - totalIssued;
-                        const isSoldOut = remaining <= 0;
-                        return (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: isSoldOut ? 'var(--red)' : 'var(--amber)' }}>
-                              {isSoldOut ? 'Sold out!' : `Only ${remaining} left`}
-                            </span>
-                            <button 
-                              className={`btn ${isSoldOut ? 'btn-secondary' : 'btn-primary'} btn-sm`} 
-                              disabled={isSoldOut}
-                              onClick={() => handleInitiatePurchase(card)}
-                            >
-                              {isSoldOut ? 'Out of stock' : 'Buy gift card'}
-                            </button>
-                          </div>
-                        );
-                      })() : (
-                        <button className="btn btn-primary btn-sm" onClick={() => handleInitiatePurchase(card)}>
-                          Buy gift card
-                        </button>
-                      )}
+                      <div style={{ padding: '1rem 0.35rem 0 0.35rem' }}>
+                        <p style={{ margin: '0 0 0.85rem', color: 'var(--text-3)', lineHeight: 1.6, fontSize: '0.88rem' }}>{card.description}</p>
+                        
+                        {card.issue_limit ? (() => {
+                          const userPurchasedCount = userVouchers.filter(v => v.gift_card_id === card.id).length;
+                          const totalIssued = Math.max(card.issued_count || 0, userPurchasedCount);
+                          const remaining = card.issue_limit - totalIssued;
+                          const isSoldOut = remaining <= 0;
+                          return (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: isSoldOut ? 'var(--red)' : 'var(--amber)' }}>
+                                {isSoldOut ? 'Sold out!' : `Only ${remaining} left`}
+                              </span>
+                              <button 
+                                className={`btn ${isSoldOut ? 'btn-secondary' : 'btn-primary'} btn-sm`} 
+                                disabled={isSoldOut}
+                                onClick={() => handleInitiatePurchase(card)}
+                              >
+                                {isSoldOut ? 'Out of stock' : 'Buy gift card'}
+                              </button>
+                            </div>
+                          );
+                        })() : (
+                          <button className="btn btn-primary btn-sm" onClick={() => handleInitiatePurchase(card)}>
+                            Buy gift card
+                          </button>
+                        )}
+                      </div>
                     </div>
+                  );
+                })}
+              </div>
+
+              {totalMarketplacePages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', padding: '0 0.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                    Showing {(marketplacePage - 1) * ITEMS_PER_PAGE + 1} - {Math.min(filteredCatalog.length, marketplacePage * ITEMS_PER_PAGE)} of {filteredCatalog.length}
+                  </span>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      disabled={marketplacePage === 1}
+                      onClick={() => setMarketplacePage(p => Math.max(1, p - 1))}
+                      style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
+                    >
+                      Previous
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      disabled={marketplacePage === totalMarketplacePages}
+                      onClick={() => setMarketplacePage(p => Math.min(totalMarketplacePages, p + 1))}
+                      style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
+                    >
+                      Next
+                    </button>
                   </div>
-                );
-              })}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -766,7 +676,7 @@ export default function UserDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {deposits.map((d) => (
+                    {slicedDeposits.map((d) => (
                       <tr key={d.id}>
                         <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(d.created_at).toLocaleString()}</td>
                         <td style={{ fontWeight: 600 }}>{d.payment_method || 'Wallet Top-up'}</td>
@@ -781,6 +691,32 @@ export default function UserDashboard() {
                     ))}
                   </tbody>
                 </table>
+
+                {totalDepositPages > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.25rem', padding: '0 0.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                      Showing {(depositPage - 1) * ITEMS_PER_PAGE + 1} - {Math.min(deposits.length, depositPage * ITEMS_PER_PAGE)} of {deposits.length}
+                    </span>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={depositPage === 1}
+                        onClick={() => setDepositPage(p => Math.max(1, p - 1))}
+                        style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
+                      >
+                        Previous
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={depositPage === totalDepositPages}
+                        onClick={() => setDepositPage(p => Math.min(totalDepositPages, p + 1))}
+                        style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -799,7 +735,7 @@ export default function UserDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {withdrawals.map((w) => (
+                    {slicedWithdrawals.map((w) => (
                       <tr key={w.id}>
                         <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(w.created_at).toLocaleString()}</td>
                         <td className="mono font-medium">₹{w.amount.toFixed(2)}</td>
@@ -808,11 +744,39 @@ export default function UserDashboard() {
                             {w.status.charAt(0).toUpperCase() + w.status.slice(1)}
                           </span>
                         </td>
-                        <td className="mono text-muted">...{w.account_number.slice(-4)}</td>
+                        <td className="mono text-muted" style={{ fontSize: '0.82rem' }}>
+                          {w.account_number.includes('@') ? w.account_number : `...${w.account_number.slice(-4)}`}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+
+                {totalWithdrawalPages > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.25rem', padding: '0 0.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                      Showing {(withdrawPage - 1) * ITEMS_PER_PAGE + 1} - {Math.min(withdrawals.length, withdrawPage * ITEMS_PER_PAGE)} of {withdrawals.length}
+                    </span>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={withdrawPage === 1}
+                        onClick={() => setWithdrawPage(p => Math.max(1, p - 1))}
+                        style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
+                      >
+                        Previous
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={withdrawPage === totalWithdrawalPages}
+                        onClick={() => setWithdrawPage(p => Math.min(totalWithdrawalPages, p + 1))}
+                        style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -863,7 +827,7 @@ export default function UserDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {combinedTransactions.map((transaction, index) => (
+                  {slicedActivity.map((transaction, index) => (
                     <tr key={`${transaction.date}-${index}`}>
                       <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(transaction.date).toLocaleString()}</td>
                       <td>{transaction.brand}</td>
@@ -878,6 +842,32 @@ export default function UserDashboard() {
                   ))}
                 </tbody>
               </table>
+
+              {totalActivityPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.25rem', padding: '1rem 1.25rem', flexWrap: 'wrap', gap: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.4)' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                    Showing {(activityPage - 1) * ITEMS_PER_PAGE + 1} - {Math.min(combinedTransactions.length, activityPage * ITEMS_PER_PAGE)} of {combinedTransactions.length}
+                  </span>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      disabled={activityPage === 1}
+                      onClick={() => setActivityPage(p => Math.max(1, p - 1))}
+                      style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
+                    >
+                      Previous
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      disabled={activityPage === totalActivityPages}
+                      onClick={() => setActivityPage(p => Math.min(totalActivityPages, p + 1))}
+                      style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -908,128 +898,172 @@ export default function UserDashboard() {
             </div>
           ) : (
             <>
-              {(() => {
-                const activeVouchersList = userVouchers.filter(v => v.status !== 'redeemed' && !v.is_used);
-                const redeemedVouchersList = userVouchers.filter(v => v.status === 'redeemed' || v.is_used);
+              {/* Tab Selector */}
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
+                <button
+                  className={`btn btn-sm ${vouchersTab === 'unused' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => { setVouchersTab('unused'); setCardsPage(1); }}
+                  style={{ borderRadius: '99px', padding: '0.5rem 1.25rem' }}
+                >
+                  Unused ({activeVoucherCount})
+                </button>
+                <button
+                  className={`btn btn-sm ${vouchersTab === 'used' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => { setVouchersTab('used'); setCardsPage(1); }}
+                  style={{ borderRadius: '99px', padding: '0.5rem 1.25rem' }}
+                >
+                  Used ({usedVoucherCount})
+                </button>
+              </div>
 
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
-                    {activeVouchersList.length > 0 ? (
-                      <div className="responsive-grid-3">
-                        {activeVouchersList.map((voucher) => (
-                          <div
-                            key={voucher.id}
-                            className="glass-card-glow"
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(e) => e.key === 'Enter' && setActiveVoucher(voucher)}
-                            onClick={() => setActiveVoucher(voucher)}
-                            style={{ padding: '1rem', textAlign: 'left', cursor: 'pointer' }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem' }}>
-                              <div>
-                                <div className="section-label" style={{ marginBottom: '0.3rem' }}>
-                                  <Gift size={12} style={{ display: 'inline', marginRight: '0.25rem', verticalAlign: 'middle' }} />
-                                  {voucher.company_name || 'Brand partner'}
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                  <div style={{ fontWeight: 800, fontFamily: 'monospace', fontSize: '0.92rem', letterSpacing: '0.02em' }}>
-                                    {visibleCodes[voucher.id] ? voucher.code : '••••••••••••'}
-                                  </div>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); setVisibleCodes(prev => ({ ...prev, [voucher.id]: !prev[voucher.id] })); }}
-                                    style={{ background: 'rgba(255,255,255,0.4)', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: '4px', borderRadius: '8px', display: 'flex' }}
-                                  >
-                                    {visibleCodes[voucher.id] ? <EyeOff size={14} /> : <Eye size={14} />}
-                                  </button>
-                                </div>
+              {vouchersTab === 'unused' ? (
+                <>
+                  {slicedCards.length > 0 ? (
+                    <div className="responsive-grid-3">
+                      {slicedCards.map((voucher) => (
+                        <div
+                          key={voucher.id}
+                          className="glass-card-glow"
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === 'Enter' && setActiveVoucher(voucher)}
+                          onClick={() => setActiveVoucher(voucher)}
+                          style={{ padding: '1rem', textAlign: 'left', cursor: 'pointer' }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem' }}>
+                            <div>
+                              <div className="section-label" style={{ marginBottom: '0.3rem' }}>
+                                <Gift size={12} style={{ display: 'inline', marginRight: '0.25rem', verticalAlign: 'middle' }} />
+                                {voucher.company_name || 'Brand partner'}
                               </div>
-                              <span className="badge badge-green">{voucher.status}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <div style={{ fontWeight: 800, fontFamily: 'monospace', fontSize: '0.92rem', letterSpacing: '0.02em' }}>
+                                  {visibleCodes[voucher.id] ? voucher.code : '••••••••••••'}
+                                </div>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setVisibleCodes(prev => ({ ...prev, [voucher.id]: !prev[voucher.id] })); }}
+                                  style={{ background: 'rgba(255,255,255,0.4)', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: '4px', borderRadius: '8px', display: 'flex' }}
+                                  type="button"
+                                >
+                                  {visibleCodes[voucher.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                                </button>
+                              </div>
                             </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.35)' }}>
-                              <div>
-                                <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Remaining</div>
-                                <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>₹{(voucher.remaining_balance ?? 0).toFixed(2)}</div>
-                              </div>
-                              <div style={{ textAlign: 'right' }}>
-                                <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Expires</div>
-                                <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{new Date(voucher.expiry_date).toLocaleDateString()}</div>
-                              </div>
+                            <span className="badge badge-green">{voucher.status}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.35)' }}>
+                            <div>
+                              <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Remaining</div>
+                              <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>₹{(voucher.remaining_balance ?? 0).toFixed(2)}</div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Expires</div>
+                              <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{new Date(voucher.expiry_date).toLocaleDateString()}</div>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="glass-card-strong empty-state" style={{ padding: '1.5rem' }}>
-                        <div className="empty-state__icon" style={{ width: 44, height: 44 }}><CreditCard size={20} /></div>
-                        <div>
-                          <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.9rem' }}>No active vouchers right now.</p>
                         </div>
-                      </div>
-                    )}
-
-                    {redeemedVouchersList.length > 0 && (
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="glass-card-strong empty-state" style={{ padding: '1.5rem' }}>
+                      <div className="empty-state__icon" style={{ width: 44, height: 44 }}><CreditCard size={20} /></div>
                       <div>
-                        <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                          <span className="section-label">Past vouchers</span>
-                          <span className="badge badge-gray" style={{ fontSize: '0.6rem' }}>{redeemedVouchersList.length}</span>
-                        </div>
-                        <div className="responsive-grid-3">
-                          {redeemedVouchersList.map((voucher) => (
-                            <div
-                              key={voucher.id}
-                              className="glass-card-strong"
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(e) => e.key === 'Enter' && setActiveVoucher(voucher)}
-                              onClick={() => setActiveVoucher(voucher)}
-                              style={{ padding: '1rem', textAlign: 'left', opacity: 0.75, cursor: 'pointer' }}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem' }}>
-                                <div>
-                                  <div className="section-label" style={{ marginBottom: '0.3rem', color: 'var(--text-4)' }}>
-                                    {voucher.company_name || 'Brand partner'}
-                                  </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <div style={{ fontWeight: 800, fontFamily: 'monospace', color: 'var(--text-3)', fontSize: '0.92rem' }}>
-                                      {visibleCodes[voucher.id] ? voucher.code : '••••••••••••'}
-                                    </div>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); setVisibleCodes(prev => ({ ...prev, [voucher.id]: !prev[voucher.id] })); }}
-                                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-4)', padding: 0, display: 'flex' }}
-                                    >
-                                      {visibleCodes[voucher.id] ? <EyeOff size={14} /> : <Eye size={14} />}
-                                    </button>
-                                  </div>
-                                </div>
-                                <span className="badge badge-gray">{voucher.status}</span>
+                        <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.9rem' }}>No active/unused vouchers in this page.</p>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {slicedCards.length > 0 ? (
+                    <div className="responsive-grid-3">
+                      {slicedCards.map((voucher) => (
+                        <div
+                          key={voucher.id}
+                          className="glass-card-strong"
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === 'Enter' && setActiveVoucher(voucher)}
+                          onClick={() => setActiveVoucher(voucher)}
+                          style={{ padding: '1rem', textAlign: 'left', opacity: 0.75, cursor: 'pointer' }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem' }}>
+                            <div>
+                              <div className="section-label" style={{ marginBottom: '0.3rem', color: 'var(--text-4)' }}>
+                                {voucher.company_name || 'Brand partner'}
                               </div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.25)' }}>
-                                <div>
-                                  <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Remaining</div>
-                                  <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>₹{(voucher.remaining_balance ?? 0).toFixed(2)}</div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <div style={{ fontWeight: 800, fontFamily: 'monospace', color: 'var(--text-3)', fontSize: '0.92rem' }}>
+                                  {visibleCodes[voucher.id] ? voucher.code : '••••••••••••'}
                                 </div>
-                                <div style={{ textAlign: 'right' }}>
-                                  <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Expires</div>
-                                  <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>{new Date(voucher.expiry_date).toLocaleDateString()}</div>
-                                </div>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setVisibleCodes(prev => ({ ...prev, [voucher.id]: !prev[voucher.id] })); }}
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-4)', padding: 0, display: 'flex' }}
+                                  type="button"
+                                >
+                                  {visibleCodes[voucher.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                                </button>
                               </div>
                             </div>
-                          ))}
+                            <span className="badge badge-gray">{voucher.status}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.25)' }}>
+                            <div>
+                              <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Remaining</div>
+                              <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>₹{(voucher.remaining_balance ?? 0).toFixed(2)}</div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Expires</div>
+                              <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>{new Date(voucher.expiry_date).toLocaleDateString()}</div>
+                            </div>
+                          </div>
                         </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="glass-card-strong empty-state" style={{ padding: '1.5rem' }}>
+                      <div className="empty-state__icon" style={{ width: 44, height: 44 }}><CreditCard size={20} /></div>
+                      <div>
+                        <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.9rem' }}>No used/redeemed vouchers in this page.</p>
                       </div>
-                    )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {totalCardsPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', padding: '0 0.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                    Showing {(cardsPage - 1) * ITEMS_PER_PAGE + 1} - {Math.min(selectedCardsList.length, cardsPage * ITEMS_PER_PAGE)} of {selectedCardsList.length}
+                  </span>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      disabled={cardsPage === 1}
+                      onClick={() => setCardsPage(p => Math.max(1, p - 1))}
+                      style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
+                    >
+                      Previous
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      disabled={cardsPage === totalCardsPages}
+                      onClick={() => setCardsPage(p => Math.min(totalCardsPages, p + 1))}
+                      style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
+                    >
+                      Next
+                    </button>
                   </div>
-                );
-              })()}
+                </div>
+              )}
             </>
           )}
         </div>
       )}
 
       {activeVoucher && (
-        <div className="glass-modal-overlay" style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', padding: '1rem', zIndex: 50 }}>
-          <div className="glass-modal-panel fade-in" style={{ maxWidth: '420px', width: '100%', padding: '1.5rem' }}>
+        <div className="glass-modal-overlay">
+          <div className="glass-modal-panel fade-in" style={{ maxWidth: '420px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem' }}>
               <div>
                 <span className="section-label"><ShieldCheck size={13} style={{ display: 'inline', marginRight: '0.3rem', verticalAlign: 'middle' }} /> Ready to scan</span>
@@ -1103,8 +1137,8 @@ export default function UserDashboard() {
       )}
 
       {showPaymentModal && selectedProduct && (
-        <div className="glass-modal-overlay" style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, overflow: 'auto', padding: '1rem' }}>
-          <div className="glass-modal-panel fade-in" style={{ width: '100%', maxWidth: '480px', margin: 'auto', padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1rem', borderRadius: '24px' }}>
+        <div className="glass-modal-overlay">
+          <div className="glass-modal-panel fade-in" style={{ maxWidth: '480px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start' }}>
               <div>
                 <span className="section-label"><Zap size={13} style={{ display: 'inline', marginRight: '0.3rem', verticalAlign: 'middle' }} /> Checkout</span>
@@ -1155,30 +1189,24 @@ export default function UserDashboard() {
               </div>
             </div>
 
-            <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleRazorpayPurchase} disabled={paymentLoading}>
-              {paymentLoading ? (
-                <><span className="spinner" /> Processing...</>
-              ) : 'Pay with Razorpay'}
-            </button>
-
-            <div style={{ position: 'relative', textAlign: 'center', margin: '0.15rem 0' }}>
-              <span style={{ background: '#ffffff', padding: '0 0.75rem', position: 'relative', zIndex: 1, fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, letterSpacing: '0.08em' }}>
-                OR PAY WITH WALLET
-              </span>
-              <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: '1px', background: 'rgba(0,0,0,0.1)' }} />
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.5rem' }}>
               <div style={{ flex: 1, padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.03)', borderRadius: '14px' }}>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Wallet</div>
-                <strong style={{ fontSize: '1rem' }}>₹{walletBalance.toFixed(2)}</strong>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Wallet Balance</div>
+                <strong style={{ fontSize: '1.1rem' }}>₹{walletBalance.toFixed(2)}</strong>
               </div>
               <button
-                className="btn btn-secondary btn-sm"
+                className="btn btn-primary"
+                style={{ flex: 1.5, padding: '0.9rem', fontSize: '0.95rem', fontWeight: 700, borderRadius: '12px' }}
                 disabled={paymentLoading || walletBalance < selectedProduct.price}
                 onClick={handleConfirmWalletPayment}
               >
-                {walletBalance < selectedProduct.price ? 'Insufficient' : 'Pay from Wallet'}
+                {paymentLoading ? (
+                  <><span className="spinner" /> Processing...</>
+                ) : walletBalance < selectedProduct.price ? (
+                  'Insufficient Funds'
+                ) : (
+                  'Pay from Wallet'
+                )}
               </button>
             </div>
           </div>
@@ -1186,8 +1214,8 @@ export default function UserDashboard() {
       )}
 
       {showWithdrawModal && (
-        <div className="glass-modal-overlay" style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', padding: '1rem', zIndex: 50, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(12px)' }}>
-          <div className="glass-modal-panel fade-in" style={{ maxWidth: '440px', width: '100%', padding: '2rem', borderRadius: '24px', background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-hero)' }}>
+        <div className="glass-modal-overlay">
+          <div className="glass-modal-panel fade-in" style={{ maxWidth: '440px' }}>
             {withdrawStep === 1 && (
               <form onSubmit={handleWithdrawalSubmit} style={{ display: 'grid', gap: '1.2rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
@@ -1215,12 +1243,8 @@ export default function UserDashboard() {
                   <input className="input mono" type="number" step="0.01" max={walletBalance} required value={withdrawForm.amount} onChange={(event) => setWithdrawForm({ ...withdrawForm, amount: event.target.value })} placeholder="0.00" style={{ width: '100%', fontSize: '1.1rem', padding: '0.75rem 1rem' }} />
                 </div>
                 <div>
-                  <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>IFSC / Routing code</label>
-                  <input className="input mono" required value={withdrawForm.routing} onChange={(event) => setWithdrawForm({ ...withdrawForm, routing: event.target.value })} placeholder="e.g. SBIN0001234" style={{ width: '100%', padding: '0.75rem 1rem' }} />
-                </div>
-                <div>
-                  <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>Bank account number</label>
-                  <input className="input mono" required value={withdrawForm.account} onChange={(event) => setWithdrawForm({ ...withdrawForm, account: event.target.value })} placeholder="Enter account number" style={{ width: '100%', padding: '0.75rem 1rem' }} />
+                  <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>PayPal Email Address</label>
+                  <input className="input mono" type="email" required value={withdrawForm.account} onChange={(event) => setWithdrawForm({ ...withdrawForm, account: event.target.value })} placeholder="your-paypal@example.com" style={{ width: '100%', padding: '0.75rem 1rem' }} />
                 </div>
 
                 <button className="btn btn-primary" disabled={withdrawLoading} type="submit" style={{ padding: '0.9rem', fontSize: '0.95rem', fontWeight: 700, borderRadius: '12px' }}>
@@ -1233,8 +1257,8 @@ export default function UserDashboard() {
               <div style={{ textAlign: 'center', display: 'grid', gap: '1.2rem', padding: '2rem 0' }}>
                 <span className="spinner" style={{ margin: '0 auto', width: '48px', height: '48px', borderWidth: '4px', borderColor: 'var(--primary) transparent transparent transparent' }} />
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>Connecting to Razorpay...</h3>
-                  <p style={{ margin: '0.4rem 0 0', color: 'var(--text-3)', fontSize: '0.9rem', lineHeight: 1.5 }}>Verifying bank routing details and securing connection.</p>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>Connecting to PayPal...</h3>
+                  <p style={{ margin: '0.4rem 0 0', color: 'var(--text-3)', fontSize: '0.9rem', lineHeight: 1.5 }}>Verifying PayPal account details and securing connection.</p>
                 </div>
               </div>
             )}
@@ -1247,7 +1271,7 @@ export default function UserDashboard() {
                 <div>
                   <h3 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>Payout Sent</h3>
                   <p style={{ margin: '0.5rem 0 0', color: 'var(--text-3)', lineHeight: 1.6, fontSize: '0.92rem' }}>
-                    Your funds of <strong>₹{parseFloat(withdrawForm.amount).toFixed(2)}</strong> are being transferred to account ending in <strong>...{withdrawForm.account.slice(-4)}</strong>.
+                    Your funds of <strong>₹{parseFloat(withdrawForm.amount).toFixed(2)}</strong> are being transferred to PayPal account <strong>{withdrawForm.account}</strong>.
                   </p>
                 </div>
                 <button className="btn btn-secondary" onClick={() => setShowWithdrawModal(false)} style={{ borderRadius: '12px', padding: '0.75rem' }}>
@@ -1260,8 +1284,8 @@ export default function UserDashboard() {
       )}
 
       {showAddMoneyModal && (
-        <div className="glass-modal-overlay" style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', padding: '1rem', zIndex: 50, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(12px)' }}>
-          <div className="glass-modal-panel fade-in" style={{ maxWidth: '440px', width: '100%', padding: '2rem', borderRadius: '24px', background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-hero)' }}>
+        <div className="glass-modal-overlay">
+          <div className="glass-modal-panel fade-in" style={{ maxWidth: '440px' }}>
             <form onSubmit={handleMockAddMoney} style={{ display: 'grid', gap: '1.2rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -1306,11 +1330,11 @@ export default function UserDashboard() {
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem', background: 'var(--surface-soft)', borderRadius: '10px', border: '1px solid var(--border)', fontSize: '0.8rem', color: 'var(--text-3)' }}>
                 <ShieldCheck size={14} style={{ color: 'var(--green)' }} />
-                <span>Secure payment gateway powered by Razorpay.</span>
+                <span>Simulated secure sandbox top-up. No real payment required.</span>
               </div>
 
               <button className="btn btn-primary" disabled={addMoneyLoading} type="submit" style={{ padding: '0.9rem', fontSize: '0.95rem', fontWeight: 700, borderRadius: '12px' }}>
-                {addMoneyLoading ? <><span className="spinner" /> Connecting...</> : 'Pay with Razorpay'}
+                {addMoneyLoading ? <><span className="spinner" /> Loading...</> : 'Confirm Top-up'}
               </button>
             </form>
           </div>

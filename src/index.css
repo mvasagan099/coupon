@@ -176,10 +176,10 @@ html {
 
 @layer base {
   .glass-header {
-    background: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.82);
   }
   [data-theme="dark"] .glass-header {
-    background: rgba(15, 23, 42, 0.6);
+    background: rgba(15, 23, 42, 0.85);
   }
   
   .shadow-glass {
@@ -460,7 +460,7 @@ html {
 
   .input:focus {
     border-color: var(--primary);
-    background: #fff;
+    background-color: #fff;
     box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
   }
 
@@ -2157,6 +2157,10 @@ html {
     animation: fadeIn 320ms ease forwards;
   }
 
+  .page-fade-in {
+    animation: pageFadeIn 320ms ease forwards;
+  }
+
   .fade-in-cards {
     animation: fadeInCards 380ms ease forwards;
   }
@@ -2625,6 +2629,15 @@ html {
   }
 }
 
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes fadeInCards {
   from {
     opacity: 0;
@@ -2901,11 +2914,29 @@ html {
     radial-gradient(circle at 85% 80%, rgba(6, 182, 212, 0.15), transparent 50%);
 }
 
-/* Glass Modal Overlay & Panel */
 .glass-modal-overlay {
-  background: #ffffff;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 9999;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+@media (max-width: 768px) {
+  .glass-modal-overlay {
+    align-items: flex-start;
+    padding-top: 1rem;
+    padding-bottom: 74px;
+    overflow-y: auto;
+  }
 }
 
 .glass-modal-panel {
@@ -2915,6 +2946,15 @@ html {
   border: 1.5px solid rgba(0, 0, 0, 0.08);
   border-radius: 28px;
   box-shadow: 0 16px 48px rgba(31, 38, 135, 0.1);
+  padding: 2rem;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .glass-modal-panel {
+    padding: 1.25rem !important;
+    border-radius: 20px !important;
+  }
 }
 
 /* Glow dot indicator */
@@ -3075,7 +3115,7 @@ html {
 /* Premium input focus */
 .input:focus {
   border-color: rgba(59, 130, 246, 0.5);
-  background: rgba(255, 255, 255, 0.95);
+  background-color: rgba(255, 255, 255, 0.95);
   box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1), 0 4px 12px rgba(59, 130, 246, 0.08);
 }
 
@@ -3086,6 +3126,11 @@ select.input {
   background-repeat: no-repeat;
   background-position: right 1rem center;
   padding-right: 2.5rem;
+}
+
+select.input option {
+  background-color: var(--surface);
+  color: var(--text-1);
 }
 
 /* Badge refinements */
@@ -3461,7 +3506,7 @@ select.input {
 }
 
 [data-theme="dark"] .glass-modal-overlay {
-  background: #0f0f14;
+  background: rgba(10, 10, 15, 0.75);
 }
 
 [data-theme="dark"] .glass-modal-panel {
@@ -3483,7 +3528,7 @@ select.input {
 
 [data-theme="dark"] .input:focus {
   border-color: rgba(79, 99, 245, 0.50);
-  background: rgba(255, 255, 255, 0.10);
+  background-color: rgba(255, 255, 255, 0.10);
   box-shadow: 0 0 0 4px rgba(79, 99, 245, 0.15), 0 4px 12px rgba(79, 99, 245, 0.08);
 }
 
@@ -3891,11 +3936,11 @@ select.input {
 
 @media (max-width: 768px) {
   /* Layout Shell */
-  .layout-dashboard-header {
-    padding: 1rem !important;
-    flex-direction: column !important;
-    align-items: stretch !important;
+  .layout-dashboard-shell {
+    padding-bottom: 74px !important;
   }
+
+
   
   .layout-dashboard-content {
     padding: 0.75rem !important;
@@ -3962,4 +4007,8 @@ select.input {
     padding-left: 0.75rem !important;
     padding-right: 0.75rem !important;
   }
+}
+
+body.body-modal-open .mobile-bottom-nav {
+  display: none !important;
 }
