@@ -1442,6 +1442,48 @@ export async function verifyRazorpayPayment(input: {
   return { verified: true };
 }
 
+// ---- PayPal API --------------------------------------------------------
+
+export async function createPayPalOrder(input: {
+  amount: number;
+  currency?: string;
+}): Promise<{ id: string }> {
+  const { data, error } = await supabase.functions.invoke("create-paypal-order", {
+    body: {
+      amount: input.amount,
+      currency: input.currency ?? "INR",
+    },
+  });
+
+  if (error) {
+    const msg = await readFunctionsInvokeErrorMessage(error);
+    throw new Error(`Failed to create PayPal order: ${msg}`);
+  }
+  
+  if (!data?.id) {
+    throw new Error("PayPal order response was incomplete.");
+  }
+  
+  return data as { id: string };
+}
+
+export async function verifyPayPalPayment(orderId: string): Promise<{ verified: boolean }> {
+  if (!orderId) {
+    throw new Error('Payment verification requires a PayPal orderId.');
+  }
+
+  const { data, error } = await supabase.functions.invoke('verify-paypal-payment', {
+    body: { order_id: orderId },
+  });
+
+  if (error) {
+    const msg = await readFunctionsInvokeErrorMessage(error);
+    throw new Error(`Payment verification failed: ${msg}`);
+  }
+
+  return { verified: !!data?.verified };
+}
+
 // ---- Withdrawal API ----------------------------------------------------
 
 export async function createWithdrawal(userId: string, amount: number, routing: string, account: string) {

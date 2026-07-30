@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { DashboardCard } from '../components/GlassCard';
 import { LoadingPage } from '../components/LoadingPage';
+import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import type { Coupon, GiftCard, Order, RedemptionTransaction, Withdrawal, UserDeposit } from '../lib/supabase';
 import {
   getGiftCards,
@@ -18,6 +19,8 @@ import {
   createWithdrawal,
   getUserWithdrawals,
   getUserDeposits,
+  createPayPalOrder,
+  verifyPayPalPayment
 } from '../lib/supabase';
 
 const validSections = ['marketplace', 'wallet', 'activity', 'cards'] as const;
@@ -280,29 +283,7 @@ export default function UserDashboard() {
     }
   };
 
-  const handleMockAddMoney = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const amountNum = parseFloat(addMoneyAmount);
-    if (isNaN(amountNum) || amountNum <= 0) {
-      toastError('Invalid amount', 'Please enter a valid amount.');
-      return;
-    }
 
-    setAddMoneyLoading(true);
-    try {
-      if (user?.id) {
-        await addFunds(user.id, amountNum);
-        await refreshWalletBalance();
-      }
-      success('Funds added', `Successfully added ₹${amountNum.toFixed(2)} to your wallet.`);
-      setShowAddMoneyModal(false);
-      setAddMoneyAmount('500');
-    } catch (err: unknown) {
-      toastError('Top-up Error', getErrorMessage(err, 'Failed to update wallet balance.'));
-    } finally {
-      setAddMoneyLoading(false);
-    }
-  };
 
 
   const combinedTransactions = useMemo(() => {
@@ -1274,7 +1255,7 @@ export default function UserDashboard() {
       {showAddMoneyModal && (
         <div className="glass-modal-overlay">
           <div className="glass-modal-panel fade-in" style={{ maxWidth: '440px' }}>
-            <form onSubmit={handleMockAddMoney} style={{ display: 'grid', gap: '1.2rem' }}>
+            <div style={{ display: 'grid', gap: '1.2rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                   <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--primary-soft)', display: 'grid', placeItems: 'center', color: 'var(--primary)' }}>
@@ -1292,11 +1273,11 @@ export default function UserDashboard() {
 
               <div>
                 <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>Amount (INR)</label>
-                <input className="input mono" type="number" min="1" required value={addMoneyAmount} onChange={(event) => setAddMoneyAmount(event.target.value)} style={{ width: '100%', fontSize: '1.2rem', padding: '0.75rem 1rem' }} />
+                <input className="input mono" type="number" min="1" required value={addMoneyAmount} onChange={(event) => setAddMoneyAmount(event.target.value)} style={{ width: '100%', fontSize: '1.2rem', padding: '0.75rem 1rem', marginBottom: '1rem' }} />
               </div>
 
               {/* Quick top-up chips */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', marginBottom: '1.5rem' }}>
                 {['500', '1000', '2000', '5000'].map((val) => (
                   <button
                     key={val}
@@ -1316,15 +1297,54 @@ export default function UserDashboard() {
                 ))}
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem', background: 'var(--surface-soft)', borderRadius: '10px', border: '1px solid var(--border)', fontSize: '0.8rem', color: 'var(--text-3)' }}>
-                <ShieldCheck size={14} style={{ color: 'var(--green)' }} />
-                <span>Simulated secure sandbox top-up. No real payment required.</span>
+              <div style={{ position: 'relative', zIndex: 0 }}>
+                {addMoneyLoading && (
+                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.5)', zIndex: 10, display: 'grid', placeItems: 'center', borderRadius: '12px' }}>
+                    <span className="spinner" style={{ width: '2rem', height: '2rem', borderTopColor: 'var(--primary)' }} />
+                  </div>
+                )}
+                
+                <PayPalScriptProvider options={{ clientId: import.meta.env.VITE_PAYPAL_CLIENT_ID || "test", currency: "USD", intent: "capture" }}>
+                  <PayPalButtons
+                    style={{ layout: "vertical", color: "blue", shape: "rect", label: "pay" }}
+                    createOrder={async () => {
+                      const amountNum = parseFloat(addMoneyAmount);
+                      if (isNaN(amountNum) || amountNum <= 0) {
+                        toastError('Invalid amount', 'Please enter a valid amount.');
+                        return "";
+                      }
+                      try {
+                        const order = await createPayPalOrder({ amount: amountNum, currency: "USD" });
+                        return order.id;
+                      } catch (err: unknown) {
+                        toastError('Checkout Error', getErrorMessage(err, 'Failed to create PayPal order.'));
+                        return "";
+                      }
+                    }}
+                    onApprove={async (data) => {
+                      setAddMoneyLoading(true);
+                      try {
+                        const result = await verifyPayPalPayment(data.orderID);
+                        if (result.verified && user?.id) {
+                          const amountNum = parseFloat(addMoneyAmount);
+                          await addFunds(user.id, amountNum, 'PayPal', data.orderID);
+                          await refreshWalletBalance();
+                          success('Funds added', `Successfully added ₹${amountNum.toFixed(2)} to your wallet.`);
+                          setShowAddMoneyModal(false);
+                          setAddMoneyAmount('500');
+                        } else {
+                          toastError('Payment Failed', 'PayPal payment could not be verified.');
+                        }
+                      } catch (err: unknown) {
+                        toastError('Verification Error', getErrorMessage(err, 'Failed to verify payment.'));
+                      } finally {
+                        setAddMoneyLoading(false);
+                      }
+                    }}
+                  />
+                </PayPalScriptProvider>
               </div>
-
-              <button className="btn btn-primary" disabled={addMoneyLoading} type="submit" style={{ padding: '0.9rem', fontSize: '0.95rem', fontWeight: 700, borderRadius: '12px' }}>
-                {addMoneyLoading ? <><span className="spinner" /> Loading...</> : 'Confirm Top-up'}
-              </button>
-            </form>
+            </div>
           </div>
         </div>
       )}
