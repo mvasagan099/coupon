@@ -36,6 +36,7 @@ const adminLinks: NavLink[] = [
   { label: 'Ledger',      path: '/admin/ledger',          Icon: BookOpen },
   { label: 'Approvals',   path: '/admin/approvals',       Icon: CheckCircle },
   { label: 'Settlements', path: '/admin/settlements',     Icon: CheckCircle },
+  { label: 'Payouts',     path: '/admin/payouts',         Icon: Wallet },
   { label: 'Security',    path: '/admin/security',        Icon: Shield },
 ];
 

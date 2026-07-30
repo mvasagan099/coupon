@@ -1656,3 +1656,73 @@ export async function adminMarkSettlementPaid(settlementId: string): Promise<voi
     }
   }
 }
+
+// ---- Admin Withdrawal Management ----
+
+export interface AdminWithdrawal {
+  id: string;
+  user_id: string;
+  email: string;
+  amount: number;
+  routing_number: string;
+  account_number: string;
+  status: 'pending' | 'completed' | 'rejected';
+  created_at: string;
+}
+
+export async function adminGetWithdrawals(): Promise<AdminWithdrawal[]> {
+  try {
+    if (!isSupabaseConfigured || hasTimedOut) throw new Error("Failing fast for local mock");
+    const { data, error } = await withTimeout(
+      supabase.rpc('admin_get_withdrawals'),
+      8000
+    );
+    if (error) throw error;
+    return data ?? [];
+  } catch (err: any) {
+    console.warn("[CouponVault] adminGetWithdrawals failed, returning mock list:", err.message);
+    const withdrawals = getLocal<Withdrawal[]>("cv_withdrawals", []);
+    const users = [
+      { id: "usr_101", email: "customer@demo.com" },
+      { id: "usr_102", email: "merchant@starbucks.com" }
+    ];
+    return withdrawals.map(w => {
+      const u = users.find(user => user.id === w.user_id);
+      return {
+        id: w.id,
+        user_id: w.user_id,
+        email: u ? u.email : "unknown@user.com",
+        amount: w.amount,
+        routing_number: w.routing_number,
+        account_number: w.account_number,
+        status: w.status,
+        created_at: w.created_at
+      } as AdminWithdrawal;
+    });
+  }
+}
+
+export async function adminUpdateWithdrawalStatus(
+  id: string,
+  status: 'completed' | 'rejected'
+): Promise<void> {
+  try {
+    if (!isSupabaseConfigured || hasTimedOut) throw new Error("Failing fast for local mock");
+    const { error } = await withTimeout(
+      supabase
+        .from('withdrawals')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', id)
+    );
+    if (error) throw error;
+  } catch (err: any) {
+    console.warn("[CouponVault] adminUpdateWithdrawalStatus failed, using local storage:", err.message);
+    const withdrawals = getLocal<Withdrawal[]>("cv_withdrawals", []);
+    const idx = withdrawals.findIndex(w => w.id === id);
+    if (idx !== -1) {
+      withdrawals[idx].status = status;
+      withdrawals[idx].updated_at = new Date().toISOString();
+      setLocal("cv_withdrawals", withdrawals);
+    }
+  }
+}

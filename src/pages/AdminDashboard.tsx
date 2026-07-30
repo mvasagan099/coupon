@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { TrendingUp, Clock, Building2, ShieldAlert, Landmark, FileText, X, Activity } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { DashboardCard } from '../components/GlassCard';
-import type { AdminPurchasedCoupon, AdminUser, Company, CompanyStats, GiftCard, Settlement } from '../lib/supabase';
+import type { AdminPurchasedCoupon, AdminUser, Company, CompanyStats, GiftCard, Settlement, AdminWithdrawal } from '../lib/supabase';
 import {
   adminApproveCompany,
   adminGenerateSettlements,
@@ -21,9 +21,11 @@ import {
   getCompanyStats,
   getGiftCards,
   updateCompanyLimit,
+  adminGetWithdrawals,
+  adminUpdateWithdrawalStatus,
 } from '../lib/supabase';
 
-const validSections = ['overview', 'partners', 'users', 'ledger', 'approvals', 'security', 'offers', 'settlements'] as const;
+const validSections = ['overview', 'partners', 'users', 'ledger', 'approvals', 'security', 'offers', 'settlements', 'payouts'] as const;
 type AdminSection = (typeof validSections)[number];
 
 function isAdminSection(value: string | undefined): value is AdminSection {
@@ -84,6 +86,9 @@ export default function AdminDashboard() {
 
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [settlementsLoading, setSettlementsLoading] = useState(false);
+
+  const [withdrawals, setWithdrawals] = useState<AdminWithdrawal[]>([]);
+  const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
 
   const securityLogs = [
     { time: '2026-05-18 14:32:01', event: 'High frequency redemptions', detail: 'User usr_732 claimed 12 coupons in 45 seconds.', severity: 'High', target: 'Acme Corp' },
@@ -173,6 +178,18 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const loadWithdrawals = useCallback(async () => {
+    try {
+      setWithdrawalsLoading(true);
+      const data = await adminGetWithdrawals();
+      setWithdrawals(data);
+    } catch (err: unknown) {
+      toastErrorRef.current('Load error', getErrorMessage(err, 'Failed to fetch payouts.'));
+    } finally {
+      setWithdrawalsLoading(false);
+    }
+  }, []);
+
   // Re-fetch when page number changes
   // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional data refetch when pagination changes
   useEffect(() => { if (currentSection === 'users') loadUsers(); }, [usersPage]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -195,6 +212,9 @@ export default function AdminDashboard() {
     }
     if (currentSection === 'settlements') {
       loadSettlements();
+    }
+    if (currentSection === 'payouts') {
+      loadWithdrawals();
     }
   }, [currentSection]); // eslint-disable-line react-hooks/exhaustive-deps
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -364,6 +384,7 @@ export default function AdminDashboard() {
     approvals: 'Review pending merchant applications',
     security: 'Security alerts and platform anomalies',
     settlements: 'Manage monthly merchant settlements',
+    payouts: 'Review and process user withdrawal payouts',
   };
 
   return (
@@ -1094,6 +1115,104 @@ export default function AdminDashboard() {
                             >
                               Mark Paid
                             </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {currentSection === 'payouts' && (
+        <div className="dashboard-section fade-in">
+          <div className="glass-card-strong" style={{ padding: '2rem', marginBottom: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.25rem', color: 'var(--text-1)' }}>User Payout Requests</h3>
+                <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.95rem' }}>Review pending withdrawals, manually transfer funds via PayPal, and update statuses.</p>
+              </div>
+            </div>
+            
+            {withdrawalsLoading ? (
+              <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-4)' }}>Loading payouts...</div>
+            ) : withdrawals.length === 0 ? (
+              <div className="empty-state" style={{ padding: '3rem', textAlign: 'center' }}>
+                <p style={{ color: 'var(--text-3)', margin: 0 }}>No payouts found.</p>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="premium-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>User Email</th>
+                      <th style={{ textAlign: 'right' }}>Amount</th>
+                      <th>Method / Account</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {withdrawals.map((w) => (
+                      <tr key={w.id}>
+                        <td style={{ color: 'var(--text-3)', fontSize: '0.85rem' }}>
+                          {new Date(w.created_at).toLocaleString()}
+                        </td>
+                        <td style={{ fontWeight: 600, color: 'var(--text-1)' }}>{w.email}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--violet-400)' }}>
+                          ₹{w.amount.toFixed(2)}
+                        </td>
+                        <td style={{ color: 'var(--text-2)', fontSize: '0.9rem' }}>
+                          <span style={{ fontWeight: 600, textTransform: 'uppercase', marginRight: '0.5rem', fontSize: '0.8rem', padding: '0.2rem 0.4rem', borderRadius: '4px', background: 'var(--surface-soft)' }}>
+                            {w.routing_number}
+                          </span>
+                          <span className="mono">{w.account_number}</span>
+                        </td>
+                        <td>
+                          <span className={`badge ${w.status === 'completed' ? 'badge-green' : w.status === 'rejected' ? 'badge-red' : 'badge-amber'}`}>
+                            {w.status.toUpperCase()}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {w.status === 'pending' && (
+                            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                              <button 
+                                className="btn btn-secondary btn-sm"
+                                style={{ backgroundColor: '#10b981', color: 'white', border: 'none', cursor: 'pointer' }}
+                                onClick={async () => {
+                                  if (!confirm(`Mark withdrawal of ₹${w.amount} for ${w.email} as COMPLETED? Verify that you have manually sent the funds first.`)) return;
+                                  try {
+                                    await adminUpdateWithdrawalStatus(w.id, 'completed');
+                                    success('Payout completed', 'The withdrawal has been marked as completed.');
+                                    await loadWithdrawals();
+                                  } catch (err: unknown) {
+                                    toastError('Update failed', getErrorMessage(err, 'Failed to update withdrawal status.'));
+                                  }
+                                }}
+                              >
+                                Mark Paid
+                              </button>
+                              <button 
+                                className="btn btn-secondary btn-sm"
+                                style={{ backgroundColor: '#ef4444', color: 'white', border: 'none', cursor: 'pointer' }}
+                                onClick={async () => {
+                                  if (!confirm(`REJECT withdrawal of ₹${w.amount} for ${w.email}? This will refund the amount back to their wallet balance.`)) return;
+                                  try {
+                                    await adminUpdateWithdrawalStatus(w.id, 'rejected');
+                                    success('Payout rejected', 'The withdrawal has been rejected and refunded.');
+                                    await loadWithdrawals();
+                                  } catch (err: unknown) {
+                                    toastError('Update failed', getErrorMessage(err, 'Failed to reject withdrawal.'));
+                                  }
+                                }}
+                              >
+                                Reject & Refund
+                              </button>
+                            </div>
                           )}
                         </td>
                       </tr>
