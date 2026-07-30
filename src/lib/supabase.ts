@@ -1452,6 +1452,7 @@ export async function createPayPalOrder(input: {
     body: {
       amount: input.amount,
       currency: input.currency ?? "INR",
+      receipt: `wallet_topup_${Date.now()}`,
     },
   });
 
