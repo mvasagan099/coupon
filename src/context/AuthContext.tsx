@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      setIsAdmin(session?.user?.user_metadata?.role === 'admin');
+      setIsAdmin(session?.user?.app_metadata?.role === 'admin');
       if (session?.user?.id) {
         try { await ensureUserProfile(session.user.id); } catch { /* non-critical */ }
       }
@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
-      setIsAdmin(session?.user?.user_metadata?.role === 'admin');
+      setIsAdmin(session?.user?.app_metadata?.role === 'admin');
       if (session?.user?.id) {
         try { await ensureUserProfile(session.user.id); } catch { /* non-critical */ }
       }

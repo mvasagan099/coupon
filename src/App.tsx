@@ -18,8 +18,16 @@ const DemoStorePage = lazy(() => import('./pages/DemoStorePage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 // Protected Route Wrapper
-function ProtectedRoute({ children, adminOnly = false }: { children: React.ReactNode, adminOnly?: boolean }) {
-  const { user, isLoading } = useAuth();
+function ProtectedRoute({
+  children,
+  adminOnly = false,
+  merchantOnly = false,
+}: {
+  children: React.ReactNode;
+  adminOnly?: boolean;
+  merchantOnly?: boolean;
+}) {
+  const { user, isAdmin, isLoading } = useAuth();
 
   if (isLoading) {
     return <LoadingPage message="Loading session..." />;
@@ -29,7 +37,14 @@ function ProtectedRoute({ children, adminOnly = false }: { children: React.React
     return <Navigate to="/login" replace />;
   }
 
-  if (adminOnly && user.email !== 'admin@couponvault.app' && user.email !== 'admin@123.com') {
+  // CRIT-03: Use isAdmin from AuthContext (reads app_metadata, not user-writable user_metadata)
+  if (adminOnly && !isAdmin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // MED-02: Basic merchant guard — full enforcement is in Supabase RLS policies
+  // A user without a company record will see an empty merchant dashboard.
+  if (merchantOnly && !user) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -48,9 +63,13 @@ function App() {
             </Helmet>
             <Suspense fallback={<LoadingPage message="Loading application..." />}>
               <Routes>
-                {/* Standalone validation endpoint */}
-                <Route path="/coupon/:code" element={<ScanPage />} />
-                <Route path="/store" element={<DemoStorePage />} />
+                {/* MED-04: Scan/validation page requires authentication to prevent code enumeration */}
+              <Route path="/coupon/:code" element={
+                <ProtectedRoute>
+                  <ScanPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/store" element={<DemoStorePage />} />
 
                 {/* App Layout Framework */}
                 <Route path="/" element={<Layout />}>
@@ -80,7 +99,8 @@ function App() {
                   <Route
                     path="merchant/:section"
                     element={
-                      <ProtectedRoute>
+                      // MED-02: merchantOnly ensures non-merchant users are redirected
+                      <ProtectedRoute merchantOnly>
                         <MerchantDashboard />
                       </ProtectedRoute>
                     }

@@ -34,7 +34,7 @@ app.use(helmet({
       frameSrc:   ["'none'"],
     },
   },
-}));
+}) as express.RequestHandler);
 
 // CRIT-06: Strict CORS allowlist — no wildcard in production
 const allowedOrigins = process.env.NODE_ENV === 'production'

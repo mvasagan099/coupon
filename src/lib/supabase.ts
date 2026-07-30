@@ -1239,21 +1239,23 @@ export async function getUserDeposits(userId: string): Promise<UserDeposit[]> {
   }
 }
 
-export async function updateUserWalletBalance(userId: string, amount: number): Promise<void> {
-  try {
-    const { error } = await supabase
-      .from("profiles")
-      .update({ wallet_balance: amount })
-      .eq("id", userId);
-      
-    if (error) throw error;
-  } catch (err: any) {
-    if (!isMissingProfilesTableError(err)) {
-      console.warn("[CouponVault] updateUserWalletBalance failed, falling back to LocalStorage:", err.message);
-    }
-  } finally {
-    localStorage.setItem(`cv-user-balance-${userId}`, String(amount));
-  }
+/**
+ * CRIT-05: This function has been intentionally disabled.
+ * Wallet balance MUST only be modified by server-side Supabase RPCs or the backend API.
+ * Direct client-side updates allow any user to set their balance to any value.
+ *
+ * All callers should be refactored to use server-side RPCs with RLS enforcement.
+ * The Supabase migration also REVOKEs direct UPDATE on wallet_balance from the
+ * authenticated role, so any remaining direct calls will fail at the database level.
+ */
+export async function updateUserWalletBalance(_userId: string, _amount: number): Promise<void> {
+  // Balance is managed server-side only. This is intentionally a no-op.
+  // After a balance-changing operation, always call refreshWalletBalance() to
+  // re-read the authoritative value from the server.
+  console.warn(
+    '[CouponVault] updateUserWalletBalance() is deprecated and has no effect. ' +
+    'Use server-side RPCs for all balance modifications.'
+  );
 }
 
 export async function ensureUserProfile(userId: string): Promise<void> {
@@ -1414,46 +1416,30 @@ export async function verifyRazorpayPayment(input: {
   razorpay_payment_id: string;
   razorpay_signature: string;
 }): Promise<{ verified: boolean }> {
-  // On localhost always skip server-side verification
-  if (isLocalDevHost()) {
-    return { verified: true };
+  // CRIT-04: All bypass paths have been removed.
+  // Payment verification MUST go through the server-side Edge Function.
+  // There is no localhost bypass, no missing-signature shortcut, and no fallback
+  // that trusts a payment_id alone — all of those were exploitable.
+
+  if (!input.razorpay_order_id || !input.razorpay_signature || !input.razorpay_payment_id) {
+    // Incomplete payment data — refuse to proceed
+    throw new Error('Payment verification requires razorpay_order_id, razorpay_payment_id, and razorpay_signature.');
   }
 
-  // Key-only mode: no server-side order was created, so there's no signature to verify.
-  // This happens when the Edge Function is unavailable and we fell back to VITE_RAZORPAY_KEY_ID.
-  // In this case Razorpay won't provide razorpay_order_id or razorpay_signature.
-  if (!input.razorpay_order_id || !input.razorpay_signature) {
-    // Payment_id alone confirms the transaction happened — treat as verified for test mode
-    return { verified: !!input.razorpay_payment_id };
+  const { data, error } = await supabase.functions.invoke('verify-razorpay-payment', {
+    body: input,
+  });
+
+  if (error) {
+    const msg = await readFunctionsInvokeErrorMessage(error);
+    throw new Error(`Payment verification failed: ${msg}`);
   }
 
-  try {
-    const { data, error } = await supabase.functions.invoke("verify-razorpay-payment", {
-      body: input,
-    });
-
-    if (!error && data?.verified) {
-      return data as { verified: boolean };
-    }
-
-    if (error) {
-      // If verify function is also unavailable, trust the payment id in test mode
-      console.warn("[CouponVault] verify-razorpay-payment Edge Function failed:", await readFunctionsInvokeErrorMessage(error));
-      return { verified: !!input.razorpay_payment_id };
-    }
-
-    if (!data?.verified) {
-      throw new Error("Razorpay payment verification failed.");
-    }
-
-    return data as { verified: boolean };
-  } catch (err) {
-    // Network-level failure — fall back to trusting payment_id (test mode only)
-    if (input.razorpay_payment_id) {
-      return { verified: true };
-    }
-    throw err;
+  if (!data?.verified) {
+    return { verified: false };
   }
+
+  return { verified: true };
 }
 
 // ---- Withdrawal API ----------------------------------------------------

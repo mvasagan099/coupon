@@ -14,7 +14,6 @@ import {
   getUserOrders,
   getUserWalletBalance,
   purchaseGiftCard,
-  updateUserWalletBalance,
   addFunds,
   createWithdrawal,
   getUserWithdrawals,
@@ -213,15 +212,11 @@ export default function UserDashboard() {
     }
 
     setPaymentLoading(true);
-    const newBalance = walletBalance - selectedProduct.price;
     try {
       await new Promise((resolve) => setTimeout(resolve, 1200));
 
-      // 1. Deduct wallet balance first
-      await updateUserWalletBalance(user.id, newBalance);
-      setWalletBalance(newBalance);
-
-      // 2. Issue the gift card coupon
+      // CRIT-05: Deduction is handled server-side by purchaseGiftCard (via Supabase RPC).
+      // We never set wallet_balance directly from the client.
       const result = await purchaseGiftCard(
         selectedProduct.id,
         user.id,
@@ -229,7 +224,7 @@ export default function UserDashboard() {
         selectedProduct.price,
       );
 
-      // 3. Re-sync balance from server to confirm
+      // Re-sync balance from server (authoritative source)
       await refreshWalletBalance();
 
       success('Payment authorized', `Voucher code generated: ${result.coupon_code}`);
@@ -238,14 +233,9 @@ export default function UserDashboard() {
       navigate('/dashboard/cards');
       loadData();
     } catch (err: unknown) {
-      // Rollback wallet deduction if coupon issuance failed
-      try {
-        await updateUserWalletBalance(user.id, walletBalance);
-        setWalletBalance(walletBalance);
-      } catch {
-        // Best-effort rollback
-      }
-      toastError('Gateway error', getErrorMessage(err, 'Transaction authorization failed. Balance has been restored.'));
+      // On failure, refresh balance from server to show the accurate amount
+      await refreshWalletBalance();
+      toastError('Gateway error', getErrorMessage(err, 'Transaction authorization failed.'));
     } finally {
       setPaymentLoading(false);
     }
@@ -270,18 +260,16 @@ export default function UserDashboard() {
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     try {
-      const newBalance = walletBalance - amount;
-      
-      // Create withdrawal request in database
+      // CRIT-05: createWithdrawal records the request server-side and triggers RLS-protected deduction.
+      // We never call updateUserWalletBalance directly.
       await createWithdrawal(user.id, amount, 'PAYPAL', withdrawForm.account);
-      
-      // Update local wallet balance state
-      await updateUserWalletBalance(user.id, newBalance);
+
+      // Re-sync balance from server (authoritative source)
       await refreshWalletBalance();
-      
+
       // Reload data to show new withdrawal
       await loadData();
-      
+
       setWithdrawStep(3); // Go to success view
       success('Payout processed', `PayPal Payout of ₹${amount.toFixed(2)} processed successfully.`);
     } catch (err: unknown) {

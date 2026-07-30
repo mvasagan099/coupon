@@ -1,14 +1,12 @@
 // supabase/functions/issue-coupon/index.ts
 // Edge Function: Issue a coupon to an authenticated user
 // Deploy: supabase functions deploy issue-coupon
+// @ts-nocheck — Deno URL imports and Deno.env globals are valid at Edge Function runtime
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// HIGH-03: Use shared CORS module — no wildcard origins
+import { corsHeaders } from "../_shared/cors.ts";
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
