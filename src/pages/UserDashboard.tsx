@@ -384,7 +384,8 @@ export default function UserDashboard() {
   const usedVoucherCount = redeemedVouchersList.length;
 
   return (
-    <div className="dashboard-container">
+    <PayPalScriptProvider options={{ clientId: import.meta.env.VITE_PAYPAL_CLIENT_ID || "test", currency: "USD", intent: "capture" }}>
+      <div className="dashboard-container">
 
       {currentSection === 'marketplace' && (
         <div className="dashboard-section fade-in">
@@ -1304,50 +1305,49 @@ export default function UserDashboard() {
                   </div>
                 )}
                 
-                <PayPalScriptProvider options={{ clientId: import.meta.env.VITE_PAYPAL_CLIENT_ID || "test", currency: "USD", intent: "capture" }}>
-                  <PayPalButtons
-                    style={{ layout: "vertical", color: "blue", shape: "rect", label: "pay" }}
-                    createOrder={async () => {
-                      const amountNum = parseFloat(addMoneyAmount);
-                      if (isNaN(amountNum) || amountNum <= 0) {
-                        toastError('Invalid amount', 'Please enter a valid amount.');
-                        return "";
+                <PayPalButtons
+                  style={{ layout: "vertical", color: "blue", shape: "rect", label: "pay" }}
+                  createOrder={async () => {
+                    const amountNum = parseFloat(addMoneyAmount);
+                    if (isNaN(amountNum) || amountNum <= 0) {
+                      toastError('Invalid amount', 'Please enter a valid amount.');
+                      return "";
+                    }
+                    try {
+                      const order = await createPayPalOrder({ amount: amountNum, currency: "USD" });
+                      return order.id;
+                    } catch (err: unknown) {
+                      toastError('Checkout Error', getErrorMessage(err, 'Failed to create PayPal order.'));
+                      return "";
+                    }
+                  }}
+                  onApprove={async (data) => {
+                    setAddMoneyLoading(true);
+                    try {
+                      const result = await verifyPayPalPayment(data.orderID);
+                      if (result.verified && user?.id) {
+                        const amountNum = parseFloat(addMoneyAmount);
+                        await addFunds(user.id, amountNum, 'PayPal', data.orderID);
+                        await refreshWalletBalance();
+                        success('Funds added', `Successfully added ₹${amountNum.toFixed(2)} to your wallet.`);
+                        setShowAddMoneyModal(false);
+                        setAddMoneyAmount('500');
+                      } else {
+                        toastError('Payment Failed', 'PayPal payment could not be verified.');
                       }
-                      try {
-                        const order = await createPayPalOrder({ amount: amountNum, currency: "USD" });
-                        return order.id;
-                      } catch (err: unknown) {
-                        toastError('Checkout Error', getErrorMessage(err, 'Failed to create PayPal order.'));
-                        return "";
-                      }
-                    }}
-                    onApprove={async (data) => {
-                      setAddMoneyLoading(true);
-                      try {
-                        const result = await verifyPayPalPayment(data.orderID);
-                        if (result.verified && user?.id) {
-                          const amountNum = parseFloat(addMoneyAmount);
-                          await addFunds(user.id, amountNum, 'PayPal', data.orderID);
-                          await refreshWalletBalance();
-                          success('Funds added', `Successfully added ₹${amountNum.toFixed(2)} to your wallet.`);
-                          setShowAddMoneyModal(false);
-                          setAddMoneyAmount('500');
-                        } else {
-                          toastError('Payment Failed', 'PayPal payment could not be verified.');
-                        }
-                      } catch (err: unknown) {
-                        toastError('Verification Error', getErrorMessage(err, 'Failed to verify payment.'));
-                      } finally {
-                        setAddMoneyLoading(false);
-                      }
-                    }}
-                  />
-                </PayPalScriptProvider>
+                    } catch (err: unknown) {
+                      toastError('Verification Error', getErrorMessage(err, 'Failed to verify payment.'));
+                    } finally {
+                      setAddMoneyLoading(false);
+                    }
+                  }}
+                />
               </div>
             </div>
           </div>
         </div>
       )}
     </div>
+    </PayPalScriptProvider>
   );
 }
