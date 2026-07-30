@@ -327,6 +327,16 @@ export default function UserDashboard() {
         amount: `-₹${w.amount.toFixed(2)}`,
         status: w.status === 'completed' ? 'Completed' : w.status === 'rejected' ? 'Rejected' : 'Pending',
       });
+
+      if (w.status === 'rejected') {
+        list.push({
+          date: w.updated_at || w.created_at,
+          brand: `Refund (Rejected Payout)`,
+          type: 'Refund',
+          amount: `+₹${w.amount.toFixed(2)}`,
+          status: 'Completed',
+        });
+      }
     });
 
     return list.sort((a, b) => b.date.localeCompare(a.date));
@@ -802,12 +812,27 @@ export default function UserDashboard() {
                       <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(transaction.date).toLocaleString()}</td>
                       <td>{transaction.brand}</td>
                       <td>
-                        <span className={`badge ${transaction.type === 'Purchase' ? 'badge-purple' : 'badge-green'}`}>
+                        <span className={`badge ${
+                          transaction.type === 'Purchase' ? 'badge-purple' :
+                          transaction.type === 'Redemption' ? 'badge-blue' :
+                          transaction.type === 'Deposit' ? 'badge-green' :
+                          transaction.type === 'Withdrawal' ? 'badge-amber' :
+                          transaction.type === 'Refund' ? 'badge-cyan' :
+                          'badge-gray'
+                        }`}>
                           {transaction.type}
                         </span>
                       </td>
                       <td className="mono" style={{ fontWeight: 600 }}>{transaction.amount}</td>
-                      <td><span className="badge badge-green" style={{ fontSize: '0.65rem' }}>{transaction.status}</span></td>
+                      <td>
+                        <span className={`badge ${
+                          transaction.status === 'Completed' || transaction.status === 'Settled' ? 'badge-green' :
+                          transaction.status === 'Rejected' || transaction.status === 'Failed' ? 'badge-red' :
+                          'badge-amber'
+                        }`} style={{ fontSize: '0.65rem' }}>
+                          {transaction.status}
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
