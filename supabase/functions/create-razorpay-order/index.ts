@@ -1,6 +1,8 @@
 // @ts-nocheck — Deno URL imports and Deno.env globals are valid at Edge Function runtime
-// HIGH-03: Use shared CORS module — no wildcard origins
+// HIGH-03 FIX: Added JWT authentication — previously this function had NO auth check,
+// allowing anyone to spam Razorpay order creation and use it as an open proxy.
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 
 function jsonResponse(body: unknown, status = 200) {
@@ -26,6 +28,25 @@ serve(async (req: Request) => {
 
   if (req.method !== "POST") {
     return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  // HIGH-03 FIX: Verify the caller has a valid Supabase session.
+  // Previously there was no auth check at all on this endpoint.
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const jwt = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!jwt) {
+    return jsonResponse({ error: "Authentication required" }, 401);
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: `Bearer ${jwt}` } },
+  });
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) {
+    return jsonResponse({ error: "Invalid or expired session" }, 401);
   }
 
   try {
@@ -74,11 +95,11 @@ serve(async (req: Request) => {
       return jsonResponse({ error: "Receipt is required." }, 400);
     }
 
-    const authHeader = `Basic ${btoa(`${razorpayKeyId}:${razorpayKeySecret}`)}`;
+    const rzpAuthHeader = `Basic ${btoa(`${razorpayKeyId}:${razorpayKeySecret}`)}`;
     const response = await fetch("https://api.razorpay.com/v1/orders", {
       method: "POST",
       headers: {
-        Authorization: authHeader,
+        Authorization: rzpAuthHeader,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
