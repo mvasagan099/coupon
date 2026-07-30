@@ -2948,6 +2948,8 @@ html {
   box-shadow: 0 16px 48px rgba(31, 38, 135, 0.1);
   padding: 2rem;
   width: 100%;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
 }
 
 @media (max-width: 768px) {
