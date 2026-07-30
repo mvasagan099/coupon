@@ -90,6 +90,24 @@ export default function AdminDashboard() {
   const [withdrawals, setWithdrawals] = useState<AdminWithdrawal[]>([]);
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
 
+  const [confirmModal, setConfirmModal] = useState<{
+    show: boolean;
+    title: string;
+    message: string;
+    actionType: 'approve' | 'reject' | null;
+    withdrawalId: string | null;
+    amount: number;
+    email: string;
+  }>({
+    show: false,
+    title: '',
+    message: '',
+    actionType: null,
+    withdrawalId: null,
+    amount: 0,
+    email: '',
+  });
+
   const securityLogs = [
     { time: '2026-05-18 14:32:01', event: 'High frequency redemptions', detail: 'User usr_732 claimed 12 coupons in 45 seconds.', severity: 'High', target: 'Acme Corp' },
     { time: '2026-05-18 11:15:40', event: 'Rapid balance fluctuation', detail: 'Wallet value rose by ₹48.50 in under one minute.', severity: 'Medium', target: 'usr_902' },
@@ -1183,32 +1201,30 @@ export default function AdminDashboard() {
                               <button 
                                 className="btn btn-secondary btn-sm"
                                 style={{ backgroundColor: '#10b981', color: 'white', border: 'none', cursor: 'pointer' }}
-                                onClick={async () => {
-                                  if (!confirm(`Mark withdrawal of ₹${w.amount} for ${w.email} as COMPLETED? Verify that you have manually sent the funds first.`)) return;
-                                  try {
-                                    await adminUpdateWithdrawalStatus(w.id, 'completed');
-                                    success('Payout completed', 'The withdrawal has been marked as completed.');
-                                    await loadWithdrawals();
-                                  } catch (err: unknown) {
-                                    toastError('Update failed', getErrorMessage(err, 'Failed to update withdrawal status.'));
-                                  }
-                                }}
+                                onClick={() => setConfirmModal({
+                                  show: true,
+                                  title: 'Confirm Payout Completion',
+                                  message: `Are you sure you want to mark the withdrawal of ₹${w.amount.toFixed(2)} for ${w.email} as COMPLETED? Make sure you have manually sent the funds via PayPal first.`,
+                                  actionType: 'approve',
+                                  withdrawalId: w.id,
+                                  amount: w.amount,
+                                  email: w.email,
+                                })}
                               >
                                 Mark Paid
                               </button>
                               <button 
                                 className="btn btn-secondary btn-sm"
                                 style={{ backgroundColor: '#ef4444', color: 'white', border: 'none', cursor: 'pointer' }}
-                                onClick={async () => {
-                                  if (!confirm(`REJECT withdrawal of ₹${w.amount} for ${w.email}? This will refund the amount back to their wallet balance.`)) return;
-                                  try {
-                                    await adminUpdateWithdrawalStatus(w.id, 'rejected');
-                                    success('Payout rejected', 'The withdrawal has been rejected and refunded.');
-                                    await loadWithdrawals();
-                                  } catch (err: unknown) {
-                                    toastError('Update failed', getErrorMessage(err, 'Failed to reject withdrawal.'));
-                                  }
-                                }}
+                                onClick={() => setConfirmModal({
+                                  show: true,
+                                  title: 'Reject Payout Request',
+                                  message: `Are you sure you want to REJECT the withdrawal of ₹${w.amount.toFixed(2)} for ${w.email}? This will automatically refund the money back into their wallet balance.`,
+                                  actionType: 'reject',
+                                  withdrawalId: w.id,
+                                  amount: w.amount,
+                                  email: w.email,
+                                })}
                               >
                                 Reject & Refund
                               </button>
@@ -1221,6 +1237,72 @@ export default function AdminDashboard() {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {confirmModal.show && (
+        <div className="glass-modal-overlay" style={{ zIndex: 10000 }}>
+          <div className="glass-modal-panel" style={{ maxWidth: '480px', padding: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>
+              <div style={{ 
+                width: '60px', 
+                height: '60px', 
+                borderRadius: '50%', 
+                backgroundColor: confirmModal.actionType === 'approve' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', 
+                display: 'grid', 
+                placeItems: 'center' 
+              }}>
+                <Landmark size={30} style={{ color: confirmModal.actionType === 'approve' ? '#10b981' : '#ef4444' }} />
+              </div>
+            </div>
+            
+            <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.25rem', color: 'var(--text-1)', textAlign: 'center' }}>
+              {confirmModal.title}
+            </h3>
+            
+            <p style={{ margin: '0 0 2rem', color: 'var(--text-3)', fontSize: '0.95rem', lineHeight: '1.6', textAlign: 'center' }}>
+              {confirmModal.message}
+            </p>
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => setConfirmModal(prev => ({ ...prev, show: false }))}
+                style={{ padding: '0.75rem 1.5rem', borderRadius: '12px', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn" 
+                onClick={async () => {
+                  if (!confirmModal.withdrawalId || !confirmModal.actionType) return;
+                  try {
+                    const status = confirmModal.actionType === 'approve' ? 'completed' : 'rejected';
+                    await adminUpdateWithdrawalStatus(confirmModal.withdrawalId, status);
+                    success(
+                      confirmModal.actionType === 'approve' ? 'Payout completed' : 'Payout rejected',
+                      confirmModal.actionType === 'approve' ? 'The withdrawal has been marked as completed.' : 'The withdrawal has been rejected and refunded.'
+                    );
+                    setConfirmModal(prev => ({ ...prev, show: false }));
+                    await loadWithdrawals();
+                  } catch (err: unknown) {
+                    toastError('Update failed', getErrorMessage(err, 'Failed to update withdrawal status.'));
+                  }
+                }}
+                style={{ 
+                  padding: '0.75rem 1.5rem', 
+                  borderRadius: '12px', 
+                  backgroundColor: confirmModal.actionType === 'approve' ? '#10b981' : '#ef4444', 
+                  color: 'white', 
+                  border: 'none', 
+                  cursor: 'pointer',
+                  fontWeight: 600
+                }}
+              >
+                {confirmModal.actionType === 'approve' ? 'Yes, Complete Payout' : 'Yes, Reject & Refund'}
+              </button>
+            </div>
           </div>
         </div>
       )}
