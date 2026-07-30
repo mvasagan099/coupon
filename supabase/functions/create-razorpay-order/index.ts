@@ -1,3 +1,4 @@
+// @ts-nocheck — Deno URL imports and Deno.env globals are valid at Edge Function runtime
 // HIGH-03: Use shared CORS module — no wildcard origins
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
