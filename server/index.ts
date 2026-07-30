@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
+import { timingSafeEqual } from 'crypto'; // H-1: constant-time comparison
 
 dotenv.config();
 
@@ -14,6 +15,15 @@ for (const key of REQUIRED_ENV) {
     console.error(`FATAL: Missing required environment variable: ${key}`);
     process.exit(1);
   }
+}
+
+// M-5 FIX: Enforce minimum entropy on the API key.
+// A short or guessable key passes the presence check above but is still
+// trivially brute-forced — reject at startup before any traffic arrives.
+if (process.env.API_KEY!.length < 32) {
+  console.error('FATAL: API_KEY must be at least 32 characters of high-entropy random data.');
+  console.error('Generate one with: node -e "console.log(require(\"crypto\").randomBytes(32).toString(\"hex\"))"');
+  process.exit(1);
 }
 
 const SUPABASE_URL        = process.env.SUPABASE_URL!;
@@ -74,13 +84,33 @@ app.use(express.json({ limit: '64kb' }));
 
 // ── Authentication middleware ─────────────────────────────────────────────────
 // HIGH-09: API key must be a strong random value (see .env.example)
+// H-1 FIX: Use constant-time comparison to prevent timing side-channel attacks.
+// JavaScript's !== short-circuits on the first differing byte, leaking how many
+// leading characters a guessed key has in common with the real key.
 const authenticateAPIKey = (
   req: express.Request,
   res: express.Response,
   next: express.NextFunction,
 ) => {
   const apiKey = req.headers['x-api-key'];
-  if (!apiKey || apiKey !== process.env.API_KEY) {
+  const expected = process.env.API_KEY!;
+
+  // Reject immediately if key is absent or has wrong type (avoids Buffer issues)
+  if (typeof apiKey !== 'string' || apiKey.length === 0) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  const keyBuf = Buffer.from(apiKey);
+  const expectedBuf = Buffer.from(expected);
+
+  // timingSafeEqual requires equal-length buffers — length mismatch is itself
+  // a safe early rejection (no timing information leaks from the length check
+  // because we always compare the full expected-length buffer).
+  const valid =
+    keyBuf.length === expectedBuf.length &&
+    timingSafeEqual(keyBuf, expectedBuf);
+
+  if (!valid) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
   next();
@@ -200,13 +230,19 @@ app.post('/api/v1/wallet/transfer', writeLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid or out-of-range transfer amount.' });
     }
 
-    // Basic email format sanity check
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userEmail)) {
+    // H-2/H-3 FIX: Normalize email before any lookup or RPC call.
+    // Without normalization, "User@Example.com" and "user@example.com" are
+    // treated as distinct — a trailing-space or different-case variant can
+    // cause the transfer to silently fail or credit the wrong account.
+    const normalizedEmail = userEmail.toLowerCase().trim();
+
+    // Basic email format sanity check (after normalization)
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       return res.status(400).json({ success: false, message: 'Invalid email address.' });
     }
 
     const { data, error } = await supabase.rpc('transfer_winnings_to_wallet', {
-      p_user_email:     userEmail,
+      p_user_email:     normalizedEmail,
       p_amount:         amount,
       p_transaction_id: transactionId,
     });
@@ -222,7 +258,7 @@ app.post('/api/v1/wallet/transfer', writeLimiter, async (req, res) => {
     // Record deposit for auditing
     try {
       const { data: userProfile } = await supabase
-        .from('profiles').select('id').eq('email', userEmail).maybeSingle();
+        .from('profiles').select('id').eq('email', normalizedEmail).maybeSingle();
       if (userProfile?.id) {
         await supabase.from('deposits').insert({
           user_id:        userProfile.id,
