@@ -281,6 +281,52 @@ app.post('/api/v1/wallet/transfer', writeLimiter, async (req, res) => {
   }
 });
 
+// POST /api/v1/wallet/deposit
+// Secure server-to-server endpoint to credit user wallet via add_funds_secure (service_role)
+app.post('/api/v1/wallet/deposit', writeLimiter, async (req, res) => {
+  try {
+    const { userId, amount, referenceId, paymentMethod } = req.body;
+
+    if (!isNonEmptyString(userId) || !isNonEmptyString(referenceId)) {
+      return res.status(400).json({ success: false, message: 'Missing required parameters (userId, referenceId).' });
+    }
+
+    if (!isSafePositiveNumber(amount, 100_000)) {
+      return res.status(400).json({ success: false, message: 'Invalid or out-of-range deposit amount.' });
+    }
+
+    const { data: newBalance, error } = await supabase.rpc('add_funds_secure', {
+      p_user_id: userId,
+      p_amount:  amount,
+    });
+
+    if (error) {
+      console.error('[/wallet/deposit]', error);
+      return res.status(400).json({ success: false, message: error.message });
+    }
+
+    // Record deposit for audit
+    try {
+      await supabase.from('deposits').insert({
+        user_id:        userId,
+        amount,
+        payment_method: isNonEmptyString(paymentMethod) ? paymentMethod : 'API Deposit',
+        reference_id:   referenceId,
+        status:         'completed',
+        created_at:     new Date().toISOString(),
+      });
+    } catch (depErr) {
+      console.warn('[/wallet/deposit] Could not record deposit row:', depErr);
+    }
+
+    return res.json({ success: true, message: 'Deposit successful', newBalance });
+  } catch (err) {
+    console.error('[/wallet/deposit]', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+
 // GET /api/v1/coupons/:id
 app.get('/api/v1/coupons/:id', async (req, res) => {
   const { id } = req.params;

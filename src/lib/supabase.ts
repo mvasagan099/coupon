@@ -984,14 +984,10 @@ export async function updateBalances(newBalance: number): Promise<void> {
   }
 }
 
-// 10X SECURE: Use this for adding funds to prevent client-side manipulation
-export async function addFunds(userId: string, amount: number, _paymentMethod: string = 'Wallet Top-up', _referenceId?: string): Promise<number> {
-  const { data, error } = await supabase.rpc("add_wallet_funds", {
-    p_user_id: userId,
-    p_amount: amount
-  });
-  if (error) throw error;
-  return data;
+// DEPRECATED & DISABLED: Direct client-side wallet funding is disabled for security.
+// Funds must be added via verified server-side Edge Functions or the API server.
+export async function addFunds(_userId: string, _amount: number, _paymentMethod: string = 'Wallet Top-up', _referenceId?: string): Promise<number> {
+  throw new Error("Direct client-side fund addition is disabled for security. Use verified payment gateways.");
 }
 
 export async function getUserDeposits(userId: string): Promise<UserDeposit[]> {
@@ -1236,7 +1232,7 @@ export async function createPayPalOrder(input: {
   return data as { id: string };
 }
 
-export async function verifyPayPalPayment(orderId: string): Promise<{ verified: boolean }> {
+export async function verifyPayPalPayment(orderId: string): Promise<{ verified: boolean; amount?: number }> {
   if (!orderId) {
     throw new Error('Payment verification requires a PayPal orderId.');
   }
@@ -1250,7 +1246,7 @@ export async function verifyPayPalPayment(orderId: string): Promise<{ verified: 
     throw new Error(`Payment verification failed: ${msg}`);
   }
 
-  return { verified: !!data?.verified };
+  return { verified: !!data?.verified, amount: data?.amount };
 }
 
 // ---- Withdrawal API ----------------------------------------------------

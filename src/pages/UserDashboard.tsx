@@ -15,7 +15,6 @@ import {
   getUserOrders,
   getUserWalletBalance,
   purchaseGiftCard,
-  addFunds,
   createWithdrawal,
   getUserWithdrawals,
   getUserDeposits,
@@ -1351,8 +1350,7 @@ export default function UserDashboard() {
                     try {
                       const result = await verifyPayPalPayment(data.orderID);
                       if (result.verified && user?.id) {
-                        const amountNum = parseFloat(addMoneyAmount);
-                        await addFunds(user.id, amountNum, 'PayPal', data.orderID);
+                        const amountNum = result.amount || parseFloat(addMoneyAmount);
                         await refreshWalletBalance();
                         success('Funds added', `Successfully added ₹${amountNum.toFixed(2)} to your wallet.`);
                         setShowAddMoneyModal(false);

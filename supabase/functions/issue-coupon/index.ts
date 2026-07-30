@@ -1,7 +1,7 @@
+// @ts-nocheck
 // supabase/functions/issue-coupon/index.ts
 // Edge Function: Issue a coupon to an authenticated user
 // Deploy: supabase functions deploy issue-coupon
-// @ts-nocheck — Deno URL imports and Deno.env globals are valid at Edge Function runtime
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";

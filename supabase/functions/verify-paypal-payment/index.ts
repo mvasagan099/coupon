@@ -1,6 +1,7 @@
 // @ts-nocheck
 // HIGH-03: Use shared CORS module — no wildcard origins
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 
 function jsonResponse(body: unknown, status = 200) {
@@ -40,6 +41,26 @@ serve(async (req: Request) => {
 
   if (req.method !== "POST") {
     return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  // Verify JWT caller
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const jwt = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!jwt) {
+    return jsonResponse({ error: "Authentication required" }, 401);
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+  const supabaseUserClient = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: `Bearer ${jwt}` } },
+  });
+
+  const { data: { user }, error: authError } = await supabaseUserClient.auth.getUser();
+  if (authError || !user) {
+    return jsonResponse({ error: "Invalid or expired session" }, 401);
   }
 
   try {
@@ -108,9 +129,50 @@ serve(async (req: Request) => {
 
     const isCompleted = payload.status === "COMPLETED";
 
+    if (isCompleted) {
+      // Extract authoritative captured amount from PayPal response
+      const captureObj = payload.purchase_units?.[0]?.payments?.captures?.[0];
+      const rawAmount = captureObj?.amount?.value || payload.purchase_units?.[0]?.amount?.value || "0";
+      const capturedAmount = parseFloat(rawAmount);
+
+      if (capturedAmount > 0 && supabaseServiceKey) {
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+        
+        // Securely credit wallet via add_funds_secure (service_role only)
+        const { error: creditError } = await supabaseAdmin.rpc("add_funds_secure", {
+          p_user_id: user.id,
+          p_amount: capturedAmount,
+        });
+
+        if (creditError) {
+          console.error("Failed to credit wallet:", creditError);
+        } else {
+          // Record deposit audit entry
+          await supabaseAdmin.from("deposits").insert({
+            user_id: user.id,
+            amount: capturedAmount,
+            payment_method: "PayPal",
+            reference_id: order_id,
+            status: "completed",
+            created_at: new Date().toISOString(),
+          });
+        }
+      }
+
+      return jsonResponse(
+        {
+          verified: true,
+          amount: capturedAmount,
+          status: payload.status,
+          details: payload,
+        },
+        200,
+      );
+    }
+
     return jsonResponse(
       {
-        verified: isCompleted,
+        verified: false,
         status: payload.status,
         details: payload,
       },

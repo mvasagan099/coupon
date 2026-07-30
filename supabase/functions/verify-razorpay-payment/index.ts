@@ -1,4 +1,6 @@
+// @ts-nocheck
 // HIGH-03: Use shared CORS module — no wildcard origins
+import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 function jsonResponse(body: unknown, status = 200) {
@@ -66,24 +68,15 @@ serve(async (req: Request) => {
       razorpayKeySecret,
     );
 
-    // MED-01 FIX: Use timing-safe comparison to prevent timing-oracle attacks.
-    // JavaScript's === short-circuits on the first mismatched byte, which
-    // can theoretically leak how many leading hex characters are correct.
-    // crypto.subtle.timingSafeEqual (via equal-length Uint8Array comparison)
-    // runs in constant time regardless of where the mismatch occurs.
+    // MED-01 FIX: Constant-time comparison to prevent timing side-channel attacks.
     const expectedBytes = new TextEncoder().encode(expectedSignature);
     const actualBytes   = new TextEncoder().encode(razorpay_signature);
-    const verified =
-      expectedBytes.length === actualBytes.length &&
-      crypto.subtle.timingSafeEqual !== undefined
-        // Modern Deno: use the built-in constant-time compare
-        ? crypto.subtle.timingSafeEqual(expectedBytes, actualBytes)
-        // Fallback: XOR-based constant-time compare (no short-circuit)
-        : (() => {
-            let diff = 0;
-            for (let i = 0; i < expectedBytes.length; i++) diff |= expectedBytes[i] ^ actualBytes[i];
-            return diff === 0;
-          })();
+    
+    let diff = expectedBytes.length ^ actualBytes.length;
+    for (let i = 0; i < expectedBytes.length && i < actualBytes.length; i++) {
+      diff |= expectedBytes[i] ^ actualBytes[i];
+    }
+    const verified = diff === 0;
 
     if (!verified) {
       return jsonResponse({ verified: false, error: "Signature mismatch." }, 400);

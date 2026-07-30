@@ -207,6 +207,13 @@ GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
 
 -- Functions called from the frontend via supabase.rpc():
 GRANT EXECUTE ON FUNCTION public.issue_gift_card_coupon(uuid, uuid, numeric) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.redeem_coupon_amount(uuid, numeric) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.validate_coupon(text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.validate_coupon_by_id(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_get_users() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_get_purchased_coupons() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_gift_cards_with_counts() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_get_withdrawals() TO authenticated;
 
 -- Server-side only (called by service_role / Edge Functions):
 GRANT EXECUTE ON FUNCTION public.deduct_wallet_balance(uuid, numeric) TO service_role;
