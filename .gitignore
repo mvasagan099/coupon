@@ -9,6 +9,10 @@ node_modules
 .env.staging
 server/.env
 
+# Allow template files
+!.env.example
+!.env.*.example
+
 # Build output
 dist
 build
